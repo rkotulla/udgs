@@ -20,6 +20,8 @@ def run_sex(file_queue, sex_exe, sex_conf, sex_param):
 
         img_fn, weight_fn = opts
         cat_file = img_fn[:-5]+".cat"
+        seg_file = img_fn[:-5]+".segments"
+
         fits_file = img_fn
 
         if (os.path.isfile(cat_file)):
@@ -33,10 +35,20 @@ def run_sex(file_queue, sex_exe, sex_conf, sex_param):
         else:
             weight_opts = """-WEIGHT_IMAGE "%s" """ % (weight_fn)
 
-        sexcmd = """%s -c %s -PARAMETERS_NAME %s %s -CATALOG_NAME %s -CATALOG_TYPE ASCII_HEAD %s """ % (
+        sexcmd = """%s 
+        -c %s 
+        -PARAMETERS_NAME %s 
+        %s 
+        -CATALOG_NAME %s 
+        -CATALOG_TYPE ASCII_HEAD
+        -CHECKIMAGE_TYPE SEGMENTATION
+        -CHECKIMAGE_NAME %s 
+        %s """ % (
             sex_exe, sex_conf, sex_param,
             weight_opts,
-            cat_file, fits_file)
+            cat_file,
+            seg_file,
+            fits_file)
         # print(sexcmd)
 
         start_time = time.time()
