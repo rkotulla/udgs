@@ -44,7 +44,8 @@ def parallel_select(catalog_queue):
             # print("Shutting down")
             break
 
-        cat_fn, output_fn = cmd
+        cat_fn, output_fn, output_reg = cmd
+
         if (os.path.isfile(output_fn)):
             catalog_queue.task_done()
             continue
@@ -61,6 +62,16 @@ def parallel_select(catalog_queue):
             catalog_queue.task_done()
             continue
 
+        # Now that we have the data, also read all the header information
+        with open(cat_fn, "r") as  cf:
+            lines = cf.readlines()
+            header = []
+            for l in lines:
+                if (l.startswith("#")):
+                    header.append(l.strip())
+            # header = [l if l.startswith("#") for l in lines]
+        print(header)
+
         udg_candidates = select(catalog)
         if (udg_candidates is None):
             print("Error with catalog %s" % (cat_fn))
@@ -69,7 +80,20 @@ def parallel_select(catalog_queue):
 
         print(cat_fn, catalog.shape, "-->", udg_candidates.shape)
 
-        numpy.savetxt(output_fn, udg_candidates)
+        numpy.savetxt(output_fn, udg_candidates,
+                      header="\n".join(header), comments='')
+
+        if (output_reg is not None):
+            with open(output_reg, "w") as reg:
+                print(output_reg)
+                hdr = """# Region file format: DS9 version 4.1
+                         global color=green dashlist=8 3 width=1 font="helvetica 10 normal roman" select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1
+                         fk5"""
+                reg.write("\n".join([a.strip() for a in hdr.splitlines()]))
+
+                labels = ["""# text(%f,%+f) font="helvetica 14 normal roman" text={%d}""" % (src[0], src[1], src[2]) for src in udg_candidates]
+                reg.write("\n".join(labels))
+
         catalog_queue.task_done()
 
 
@@ -99,8 +123,9 @@ if __name__ == "__main__":
     catalog_queue = multiprocessing.JoinableQueue()
     for cat_fn in args.input_catalogs:
         output_cat = cat_fn[:-4]+".udgcat"
+        output_reg = cat_fn[:-4]+".reg"
         print("Adding %s --> %s" % (cat_fn, output_cat))
-        catalog_queue.put((cat_fn, output_cat))
+        catalog_queue.put((cat_fn, output_cat, output_reg))
 
     # insert termination commands
     for i in range(args.number_processes):
