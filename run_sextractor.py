@@ -49,7 +49,7 @@ def run_sex(file_queue, sex_exe, sex_conf, sex_param):
             cat_file,
             seg_file,
             fits_file)
-        # print(sexcmd)
+        # print(" ".join(sexcmd.split()))
 
         start_time = time.time()
         try:
@@ -100,14 +100,23 @@ if __name__ == "__main__":
     #cmdline.print_help()
     args = cmdline.parse_args()
 
-
+    construct_weight_fn = (args.weight_image.find(":") > 0)
 
     file_queue = multiprocessing.JoinableQueue()
 
     # feed with files to sextract
     for fn in args.input_images:
         if (os.path.isfile(fn)):
-            file_queue.put((fn, args.weight_image))
+
+            if (construct_weight_fn):
+                _parts = args.weight_image.split(":")
+                search = _parts[0]
+                replace = _parts[1]
+                weight_fn = fn.replace(search, replace)
+            else:
+                weight_fn = args.weight_image
+
+            file_queue.put((fn, weight_fn))
 
     # insert termination commands
     for i in range(args.number_processes):
