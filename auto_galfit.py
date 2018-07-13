@@ -24,7 +24,11 @@ def parallel_config_writer(queue, galfit_queue):
             galfit_queue.put((None))
             break
 
-        image_fn, feedme_fn, weight_fn, src_info, img_header, galfit_output, galfit_logfile, segmentation_input_fn, galfit_dir, basename = cmd
+        image_fn, feedme_fn, weight_fn, src_info, \
+            img_header, galfit_output, galfit_logfile, \
+            segmentation_input_fn, galfit_dir, basename, \
+            max_size = cmd
+
         if (os.path.isfile(feedme_fn)):
             queue.task_done()
             galfit_queue.put((feedme_fn, galfit_output, galfit_logfile))
@@ -39,6 +43,8 @@ def parallel_config_writer(queue, galfit_queue):
         fwhm = src_info[9]
         src_id = int(src_info[2])
         size = 3 * fwhm
+        if (max_size > 0 and size > max_size): size = max_size
+
         x, y = src_info[3]-1, src_info[4]-1
         x1 = int(numpy.max([0, x - size]))
         x2 = int(numpy.min([x + size, img_header['NAXIS1']]))
@@ -55,20 +61,20 @@ def parallel_config_writer(queue, galfit_queue):
         phdu = pyfits.PrimaryHDU(data=img)
         phdu.header['SRC_X1'] = x1
         phdu.header['SRC_Y1'] = y1
-        phdu.writeto(img_out_fn)
+        phdu.writeto(img_out_fn, clobber=True)
         img_hdu.close()
 
         if (weight_fn is not None):
             wht_hdu = pyfits.open(weight_fn)
             wht = wht_hdu[0].data[y1:y2, x1:x2]
-            pyfits.PrimaryHDU(data=wht, header=phdu.header).writeto(weight_out_fn)
+            pyfits.PrimaryHDU(data=wht, header=phdu.header).writeto(weight_out_fn, clobber=True)
             wht_hdu.close()
 
         if (segmentation_fn is not None):
             segm_hdu = pyfits.open(segmentation_fn)
             segm = segm_hdu[0].data[y1:y2, x1:x2].astype(numpy.int)
             segm[segm == src_id] = 0
-            pyfits.PrimaryHDU(data=segm, header=phdu.header).writeto(segm_out_fn)
+            pyfits.PrimaryHDU(data=segm, header=phdu.header).writeto(segm_out_fn, clobber=True)
             segm_hdu.close()
 
 
@@ -401,11 +407,15 @@ if __name__ == "__main__":
                          action='store_true',
                          help="create plots from GALFIT results")
 
+    cmdline.add_argument("--maxsize", dest="max_size", default=-1, type=int,
+                         help="maximum cutout size for fitting")
+
     cmdline.add_argument("input_images", nargs="+",
                          help="list of input images")
     #cmdline.print_help()
     args = cmdline.parse_args()
 
+    print(args)
 
     src_queue = multiprocessing.JoinableQueue()
     galfit_queue = multiprocessing.JoinableQueue()
@@ -428,14 +438,34 @@ if __name__ == "__main__":
 
         # load catalog
         catalog = numpy.loadtxt(catalog_fn)
+        print("done loading catalog")
 
         for src in catalog:
             src_id = int(src[2])
             feedme_fn = "%s.%05d.galfeed" % (basename, src_id)
-            galfit_dir = os.path.join(basedir, args.galfit_directory)
+
+            if (args.galfit_directory.find(":") >= 0):
+                _parts = args.galfit_directory.split(":")
+                _search = _parts[0]
+                _replace = _parts[1]
+                galfit_dir = fn.replace(_search, _replace)
+            else:
+                galfit_dir = os.path.join(basedir, args.galfit_directory)
+
             if (not os.path.isdir(galfit_dir)):
                 print("Creating directory: %s" % (galfit_dir))
                 os.makedirs(galfit_dir)
+
+
+            # also work out the appropriate weight filename
+            if (args.weight_file.find(":") >= 0):
+                _parts = args.weight_file.split(":")
+                _search = _parts[0]
+                _replace = _parts[1]
+                weight_file = fn.replace(_search, _replace)
+            else:
+                weight_file = args.weight_file
+
             feedme_fullfn = os.path.join(galfit_dir, feedme_fn)
             # print(feedme_fullfn)
 
@@ -454,19 +484,22 @@ if __name__ == "__main__":
             src_queue.put((
                 fn,                 # image_fn,
                 feedme_fullfn,      # feedme_fn,
-                args.weight_file,   # weight_fn,
+                weight_file,        # weight_fn,
                 src,                # src_info,
                 hdulist[0].header,  # img_header
                 galfit_fullfn,      # galfit output filename
                 galfit_fulllogfn,
                 segmentation_fn,
-                galfit_dir, basename,
+                galfit_dir,
+                basename,
+                args.max_size,
             ))
             # print(src)
 
             total_feed_count += 1
 
     print("Configuring %d galfit runs using %d CPU-cores" % (total_feed_count, args.number_processes))
+    # sys.exit(0)
 
     #
     # Now that we have filled up the work-queue, get to work
