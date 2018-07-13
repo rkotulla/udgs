@@ -1,0 +1,1 @@
+ds9 -multiframe $1 -lock frame image -lock colorbar -frame first -frame delete -tile grid layout 3 1 -xpa no -geometry 1400x700 -zoom to fit -frame 2 -zscale -frame 3 -minmax -scale log -frame 4 -zscale
