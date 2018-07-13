@@ -15,7 +15,7 @@ def scale_and_normalize(data, scaling_mode, flux_max):
         return numpy.arcsinh((data + 0.2*flux_max)/(1.2*flux_max))
 
 
-def plot_galfit_result(fits_fn, plot_fn, scaling_mode='asinh'):
+def plot_galfit_result(fits_fn, plot_fn, scaling_mode='asinh', badpixelmask=None):
 
     hdulist = pyfits.open(fits_fn)
 
@@ -37,7 +37,27 @@ def plot_galfit_result(fits_fn, plot_fn, scaling_mode='asinh'):
     output_array[output_array <= 0] = 0.
     output_array[output_array >= 1] = 1.0
 
-    img = Image.fromarray(numpy.uint8(output_array *255))
+    print(badpixelmask)
+    if (badpixelmask is not None and os.path.isfile(badpixelmask)):
+
+        print("Found bad pixel mask")
+        bpm_hdu = pyfits.open(badpixelmask)
+        bpm = (bpm_hdu[0].data > 0)
+
+        data_r = output_array.copy()
+        data_g = output_array.copy()
+        data_b = output_array.copy()
+
+        data_r[:bpm.shape[0], :bpm.shape[1]][bpm] *= 1.00
+        data_g[:bpm.shape[0], :bpm.shape[1]][bpm] *= 0.65
+        data_b[:bpm.shape[0], :bpm.shape[1]][bpm] *= 0.10
+        img_r = Image.fromarray(numpy.uint8(data_r *255))
+        img_g = Image.fromarray(numpy.uint8(data_g *255))
+        img_b = Image.fromarray(numpy.uint8(data_b *255))
+        img = Image.merge('RGB', (img_r, img_g, img_b))
+    else:
+        img = Image.fromarray(numpy.uint8(output_array *255))
+
     img.transpose(Image.FLIP_TOP_BOTTOM).save(plot_fn)
     print("plot saves as %s" % (plot_fn))
 
@@ -47,4 +67,6 @@ if __name__ == "__main__":
         print(fn)
         out_fn = fn[:-5]+".png"
 
-        plot_galfit_result(fn, out_fn)
+        badpixelmask = fn[:-12]+".segm.fits"
+
+        plot_galfit_result(fn, out_fn, badpixelmask=badpixelmask)
