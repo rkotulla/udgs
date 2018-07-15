@@ -537,6 +537,10 @@ if __name__ == "__main__":
             segmentation_fn = None
 
         # load catalog
+        if (not os.path.isfile(catalog_fn)):
+            print("Unable to open catalog %s" % (catalog_fn))
+            continue
+
         catalog = numpy.loadtxt(catalog_fn)
         print("done loading catalog")
 
