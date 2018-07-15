@@ -605,7 +605,7 @@ if __name__ == "__main__":
     # Now that we have filled up the work-queue, get to work
     #
     feedme_workers = []
-    for i in range(10): #args.number_processes):
+    for i in range(args.number_processes):
         p = multiprocessing.Process(
             target=parallel_config_writer,
             kwargs=dict(queue=src_queue,
@@ -635,7 +635,7 @@ if __name__ == "__main__":
 
 
     galfit_workers = []
-    for i in range(1): #args.number_processes):
+    for i in range(args.number_processes):
         p = multiprocessing.Process(
             target=parallel_run_galfit,
             kwargs=dict(galfit_queue=galfit_queue,
