@@ -66,7 +66,7 @@ if __name__ == "__main__":
     for fn in sys.argv[1:]:
         print(fn)
         out_fn = fn[:-5]+".png"
-
         badpixelmask = fn[:-12]+".segm.fits"
 
-        plot_galfit_result(fn, out_fn, badpixelmask=badpixelmask)
+        if (not os.path.isfile(out_fn)):
+            plot_galfit_result(fn, out_fn, badpixelmask=badpixelmask)
