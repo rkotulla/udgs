@@ -33,8 +33,22 @@ def select(catalog):
     return catalog[udg]
 
 
+def select_from_galfit(catalog):
+    print("Not yet implemented")
+    return catalog[:]
 
-def parallel_select(catalog_queue):
+def parallel_select(catalog_queue, selection=None):
+
+    if (selection is None):
+        selection = 'sextractor'
+
+    print(selection)
+    if (selection == 'galfit'):
+        print("Using Amy's selection function")
+        selector_fct = select_from_galfit
+    else:
+        selector_fct = select
+
 
     # print("Hello from worker")
     while (True):
@@ -70,9 +84,10 @@ def parallel_select(catalog_queue):
                 if (l.startswith("#")):
                     header.append(l.strip())
             # header = [l if l.startswith("#") for l in lines]
-        print(header)
+        # print("header:\n", header)
 
-        udg_candidates = select(catalog)
+        udg_candidates = selector_fct(catalog)
+
         if (udg_candidates is None):
             print("Error with catalog %s" % (cat_fn))
             catalog_queue.task_done()
@@ -109,6 +124,15 @@ if __name__ == "__main__":
     cmdline.add_argument("--nprocs", dest="number_processes",
                          default=multiprocessing.cpu_count(), type=int,
                          help="number of Sextractors to run in parallel")
+
+    cmdline.add_argument("--ext", dest="catalog_extension", type=str, default=".cat:.udgcat",
+                         help="file extension for catalog")
+    cmdline.add_argument("--outreg", dest="region_extension", type=str, default=None,
+                         help="file extension for catalog")
+
+    cmdline.add_argument("--select", dest="selection_mode", type=str, default="sextractor",
+                         help="selection mode [sextractor/galfit]")
+
     # cmdline.add_argument("--exe", dest="sex_exe", default="sex",
     #                      help="location of SExtractor executable")
     # cmdline.add_argument("--weight", dest='weight_image', type=str, default=None,
@@ -120,10 +144,21 @@ if __name__ == "__main__":
 
 
     # Feed parallel workers
+    _parts = args.catalog_extension.split(":")
+    _search = _parts[0]
+    _replace = _parts[1]
+    print(args)
+
     catalog_queue = multiprocessing.JoinableQueue()
     for cat_fn in args.input_catalogs:
-        output_cat = cat_fn[:-4]+".udgcat"
-        output_reg = cat_fn[:-4]+".reg"
+
+        output_cat = cat_fn.replace(_search, _replace)
+        # output_cat = cat_fn[:-4]+".udgcat"
+        if (args.region_extension is not None):
+            output_reg = cat_fn[:-4]+args.region_extension
+        else:
+            output_reg = None
+
         print("Adding %s --> %s" % (cat_fn, output_cat))
         catalog_queue.put((cat_fn, output_cat, output_reg))
 
@@ -139,6 +174,7 @@ if __name__ == "__main__":
             target=parallel_select,
             kwargs=dict(
                 catalog_queue=catalog_queue,
+                selection=args.selection_mode,
             )
         )
         p.daemon = True
