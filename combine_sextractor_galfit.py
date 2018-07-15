@@ -50,6 +50,11 @@ def read_results(hdr, component, parameter, keyname=None):
         except:
             value = numpy.NaN
 
+    if (keyname == "XC" and 'SRC_X1' in hdr):
+        value += hdr['SRC_X1']
+    if (keyname == "YC" and 'SRC_Y1' in hdr):
+        value += hdr['SRC_Y1']
+
     return [value, uncert, flag]
 
 
@@ -67,7 +72,7 @@ def parallel_combine(catalog_queue, galfit_directory='galfit'):
             break
 
         img_fn, udg_cat, combined_cat = cmd
-        print(udg_cat)
+        logger.debug("Reading %s" % (udg_cat))
 
         try:
             catalog = numpy.loadtxt(udg_cat)
