@@ -10,18 +10,22 @@ import multiprocessing
 import time
 import subprocess
 
+import logging
+logging.basicConfig(filename='debug.log',level=logging.DEBUG)
 
 import plot_galfit_results
 
 
-def parallel_config_writer(queue, galfit_queue):
+def parallel_config_writer(queue, galfit_queue,
+                           n_galfeeds, n_galfit_queuesize):
 
+    counter = 0
     while (True):
 
         cmd = queue.get()
         if (cmd is None):
             queue.task_done()
-            galfit_queue.put((None))
+            # galfit_queue.put((None))
             break
 
         image_fn, feedme_fn, weight_fn, src_info, \
@@ -31,6 +35,12 @@ def parallel_config_writer(queue, galfit_queue):
 
         if (os.path.isfile(feedme_fn)):
             queue.task_done()
+            if (n_galfit_queuesize is not None):
+                with n_galfit_queuesize.get_lock():
+                    n_galfit_queuesize.value += 1
+            if (n_galfeeds is not None):
+                with n_galfeeds.get_lock():
+                    n_galfeeds.value += 1
             galfit_queue.put((feedme_fn, galfit_output, galfit_logfile))
             continue
 
@@ -64,11 +74,16 @@ def parallel_config_writer(queue, galfit_queue):
         phdu.writeto(img_out_fn, clobber=True)
         img_hdu.close()
 
+        _, _img = os.path.split(img_out_fn)
+        _weight, _bpm = 'none', 'none'
+        _, _out = os.path.split(galfit_output)
+
         if (weight_fn is not None):
             wht_hdu = pyfits.open(weight_fn)
             wht = wht_hdu[0].data[y1:y2, x1:x2]
             pyfits.PrimaryHDU(data=wht, header=phdu.header).writeto(weight_out_fn, clobber=True)
             wht_hdu.close()
+            _, _weight = os.path.split(weight_out_fn)
 
         if (segmentation_fn is not None):
             segm_hdu = pyfits.open(segmentation_fn)
@@ -76,19 +91,19 @@ def parallel_config_writer(queue, galfit_queue):
             segm[segm == src_id] = 0
             pyfits.PrimaryHDU(data=segm, header=phdu.header).writeto(segm_out_fn, clobber=True)
             segm_hdu.close()
-
+            _, _bpm = os.path.split(segm_out_fn)
 
         galfit_info = {
-            'imgfile': img_out_fn, #image_fn,
+            'imgfile': _img, #img_out_fn, #image_fn,
             'srcid': src_id,
             'x1': 0, #x1,
             'x2': x2-x1, #x2
             'y1': 0, #y1,
             'y2': y2-y1, #y2,
             'pixelscale': 0.18,
-            'weight_image': weight_out_fn if weight_fn is not None else 'none',
-            'galfit_output': galfit_output,
-            'bpm': segm_out_fn if segmentation_fn is not None else 'none',
+            'weight_image': _weight, #weight_out_fn if weight_fn is not None else 'none',
+            'galfit_output': _out, #galfit_output,
+            'bpm': _bpm, #segm_out_fn if segmentation_fn is not None else 'none',
         }
 
         head_block = """
@@ -114,7 +129,7 @@ def parallel_config_writer(queue, galfit_queue):
             'y': y-y1,
             'magnitude': src_info[5],  # +magzero,
             'halflight_radius': src_info[22],
-            'sersic_n': 1.5,  # src[7],
+            'sersic_n': src[7],
             'axis_ratio': src_info[17] / src_info[16],
             'position_angle': src_info[18],
 
@@ -170,24 +185,43 @@ def parallel_config_writer(queue, galfit_queue):
 
         # Now also prepare the segmentation mask, if available
 
-
+        # queue up a new execution of galfit
+        if (n_galfit_queuesize is not None):
+            with n_galfit_queuesize.get_lock():
+                n_galfit_queuesize.value += 1
+        if (n_galfeeds is not None):
+            with n_galfeeds.get_lock():
+                n_galfeeds.value += 1
         galfit_queue.put((feedme_fn, galfit_output, galfit_logfile))
+        counter += 1
 
         queue.task_done()
         continue
+
+    # print("Prepared %d galfeeds, queue-size = %d %d" % (
+    #     n_galfeeds.value, n_galfit_queuesize.value, counter))
 
 
 dryrun = False
 
 
-def parallel_run_galfit(galfit_queue, galfit_exe='galfit', make_plots=True, redo=False):
+def parallel_run_galfit(galfit_queue, galfit_exe='galfit',
+                        make_plots=True, redo=False,
+                        n_galfit_complete=None, n_total_galfit_time=None,
+                        n_galfit_queuesize=None, n_galfeeds=None):
 
-    print("Galfit worker started")
+    logger = logging.getLogger("GalfitWorker")
 
+    logger.debug("Galfit worker started")
+    logger.debug("%s %s %s %s" % (str(n_galfit_queuesize), str(n_galfit_complete), str(n_total_galfit_time), str(n_galfeeds)))
+    # return
+
+    counter = 0
     while (True):
 
         cmd = galfit_queue.get()
         if (cmd is None):
+            print("Received shutdown command")
             galfit_queue.task_done()
             break
 
@@ -197,27 +231,55 @@ def parallel_run_galfit(galfit_queue, galfit_exe='galfit', make_plots=True, redo
             continue
 
         feedme_fn, galfit_output_fn, logfile = cmd
+        _cwd, _feedfile = os.path.split(feedme_fn)
+
+        # if (n_galfit_queuesize is not None):
+        #     with n_galfit_queuesize.get_lock():
+        #         n_galfit_queuesize.value -= 1
+
+        counter += 1
+        # print("get message %d - %d" % (counter, n_galfit_queuesize.value))
+        # galfit_queue.task_done()
+        # continue
 
         if (os.path.isfile(galfit_output_fn) and not redo):
+            if (n_galfit_queuesize is not None):
+                with n_galfit_queuesize.get_lock():
+                    n_galfit_queuesize.value -= 1
+            if (n_galfit_complete is not None):
+                with n_galfit_complete.get_lock():
+                    n_galfit_complete.value += 1
             galfit_queue.task_done()
             continue
 
-        galfit_cmd = "%s %s" % (galfit_exe, feedme_fn)
-        print(galfit_cmd)
+        galfit_cmd = "%s %s" % (galfit_exe, _feedfile) #feedme_fn)
         # galfit_queue.task_done()
         # continue
 
         start_time = time.time()
+        returncode = -99999999
         try:
             # os.system(sexcmd)
-            ret = subprocess.Popen(galfit_cmd.split(),
-                                   stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE)
-            (_stdout, _stderr) = ret.communicate()
-            if (ret.returncode != 0):
-                print("return code was not 0")
-                print(_stdout)
-                print(_stderr)
+#             time.sleep(.2)
+            with subprocess.Popen(galfit_cmd.split(),
+                                  stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE,
+                                  cwd=_cwd) as galfit_process:
+                try:
+                    _stdout, _stderr = galfit_process.communicate(input=None, timeout=30)
+                except (TimeoutError) as e: #TimeoutExpired
+                    galfit_process.kill()
+                    print("Terminating galfit after timeout")
+
+            # ret = subprocess.Popen(galfit_cmd.split(),
+            #                        stdout=subprocess.PIPE,
+            #                        stderr=subprocess.PIPE)
+            # (_stdout, _stderr) = ret.communicate()
+                returncode = galfit_process.returncode
+                if (galfit_process.returncode != 0):
+                    print("return code was not 0 (%d)" % (galfit_process.returncode))
+                    print(str(_stdout))
+                    print(str(_stderr))
             #print(_stdout)
 
             with open(logfile, "wb") as log:
@@ -233,8 +295,33 @@ def parallel_run_galfit(galfit_queue, galfit_exe='galfit', make_plots=True, redo
         except OSError as e:
             print("Some exception has occured:\n%s" % (str(e)))
         end_time = time.time()
-        print("Galfit returned after %.3f seconds" % (end_time - start_time))
+        galfit_time = end_time - start_time
+        # print("Galfit returned after %.3f seconds" % (end_time - start_time))
+        # print(n_galfit_queuesize, n_galfit_complete, n_total_galfit_time)
 
+        logger.debug("%s ==> %d" % (galfit_cmd, returncode))
+
+
+        if (n_galfit_queuesize is not None):
+            with n_galfit_queuesize.get_lock():
+                n_galfit_queuesize.value -= 1
+        if (n_galfit_complete is not None):
+            with n_galfit_complete.get_lock():
+                n_galfit_complete.value += 1
+        if (n_total_galfit_time is not None):
+            with n_total_galfit_time.get_lock():
+                n_total_galfit_time.value += galfit_time
+        # if (n_galfit_queuesize is not None and
+        #         n_galfit_complete is not None and
+        #         n_total_galfit_time is not None and
+        #         n_galfeeds is not None):
+        #     avg_galfit_time = n_total_galfit_time.value / n_galfit_complete.value
+        #     print("Finished %d (of %d) galfit runs, %d (est. %.1f seconds) left" % (
+        #         n_galfit_complete.value,
+        #         n_galfeeds.value,
+        #         n_galfit_queuesize.value,
+        #         n_galfit_queuesize.value*avg_galfit_time,
+        #     ))
 
         # if ((make_plots or True) and os.path.isfile(galfit_output_fn)):
         #     try:
@@ -248,6 +335,7 @@ def parallel_run_galfit(galfit_queue, galfit_exe='galfit', make_plots=True, redo
         galfit_queue.task_done()
         continue
 
+    print("Shutting down galfit parallel worker-process")
 
 
 
@@ -417,8 +505,20 @@ if __name__ == "__main__":
 
     print(args)
 
+    # initialize work queues
     src_queue = multiprocessing.JoinableQueue()
     galfit_queue = multiprocessing.JoinableQueue()
+
+    # start some counters for progress info and book-keeping
+    n_galfeeds = multiprocessing.Value('i', 0, lock=True)#multiprocessing.Lock())
+    n_galfit_queuesize = multiprocessing.Value('i', 0, lock=True)#lock=multiprocessing.Lock())
+    n_galfit_complete = multiprocessing.Value('i', 0, lock=True)#lock=multiprocessing.Lock())
+    n_total_galfit_time = multiprocessing.Value('f', 0.0, lock=True) #lock=multiprocessing.Lock())
+    n_galfeeds.value = 0
+    n_galfit_queuesize.value = 0
+    n_galfit_complete.value = 0
+    n_total_galfit_time.value = 0.
+
 
     total_feed_count = 0
     for fn in args.input_images:
@@ -505,11 +605,13 @@ if __name__ == "__main__":
     # Now that we have filled up the work-queue, get to work
     #
     feedme_workers = []
-    for i in range(8): #args.number_processes):
+    for i in range(10): #args.number_processes):
         p = multiprocessing.Process(
             target=parallel_config_writer,
             kwargs=dict(queue=src_queue,
                         galfit_queue=galfit_queue,
+                        n_galfeeds=n_galfeeds,
+                        n_galfit_queuesize=n_galfit_queuesize,
                         ),
         )
         p.daemon = True
@@ -519,25 +621,60 @@ if __name__ == "__main__":
     print("Feed-me creation workers started")
     src_queue.join()
     print("Done creating all GALFIT config files, joining the fun!")
+    # print(n_galfeeds, n_galfit_queuesize)
+    # time.sleep(1)
+
+    # counter = 0
+    # while(True):
+    #     cmd = galfit_queue.get()
+    #     galfit_queue.task_done()
+    #     if (cmd is not None):
+    #         counter += 1
+    #     print(counter, n_galfeeds.value)
+
+
 
     galfit_workers = []
-    for i in range(args.number_processes):
+    for i in range(1): #args.number_processes):
         p = multiprocessing.Process(
             target=parallel_run_galfit,
             kwargs=dict(galfit_queue=galfit_queue,
                         galfit_exe=args.galfit_exe,
                         make_plots=args.plot_results,
                         redo=False,
+                        n_galfit_complete=n_galfit_complete,
+                        n_total_galfit_time=n_total_galfit_time,
+                        n_galfit_queuesize=n_galfit_queuesize,
+                        n_galfeeds=n_galfeeds,
                         )
         )
         p.daemon = True
         p.start()
         galfit_workers.append(p)
+        # galfit_queue.put((None))
+
     print("Galfit workers started")
 
     # wait for all config files to be written
+    # for i in range(30):
+    #     print n_galfit_queuesize.lock
+    #     time.sleep(10)
 
-    galfit_queue.join()
+    while (n_galfit_queuesize.value > 0):
+        try:
+            avg_galfit_time = n_total_galfit_time.value / n_galfit_complete.value
+        except ZeroDivisionError:
+            avg_galfit_time = 10.
+        sys.stdout.write("\rFinished %d (of %d) galfit runs, %d (est. %.1f seconds) left" % (
+            n_galfit_complete.value,
+            n_galfeeds.value,
+            n_galfit_queuesize.value,
+            n_galfit_queuesize.value * avg_galfit_time,
+        ))
+        sys.stdout.flush()
+        time.sleep(1)
+
+    # galfit_queue.join()
     print("done with all work!")
 
     # img_fn = sys.argv[1]
