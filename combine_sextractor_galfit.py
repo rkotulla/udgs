@@ -6,6 +6,9 @@ import numpy
 import argparse
 import multiprocessing
 import pyfits
+import logging
+import logsetup
+logsetup.setup_log()
 
 
 
@@ -54,6 +57,8 @@ def read_results(hdr, component, parameter, keyname=None):
 def parallel_combine(catalog_queue, galfit_directory='galfit'):
 
     # print("Hello from worker")
+    logger = logging.getLogger("CombineSexGalfit")
+
     while (True):
         cmd = catalog_queue.get()
         if (cmd is None):
@@ -61,19 +66,19 @@ def parallel_combine(catalog_queue, galfit_directory='galfit'):
             # print("Shutting down")
             break
 
-        cat_fn, udg_cat, combined_cat = cmd
+        img_fn, udg_cat, combined_cat = cmd
         print(udg_cat)
 
         try:
             catalog = numpy.loadtxt(udg_cat)
         except:
-            print("Error opening %s" % (udg_cat))
+            logger.warning("Error opening %s" % (udg_cat))
             catalog_queue.task_done()
             continue
 
         # print("xxx")
         if (catalog.ndim < 2 or catalog.shape[0] <= 0):
-            print("Error with catalog %s" % (udg_cat))
+            logger.warning("Error with catalog %s" % (udg_cat))
             catalog_queue.task_done()
             continue
 
@@ -83,15 +88,21 @@ def parallel_combine(catalog_queue, galfit_directory='galfit'):
             for l in lines:
                 if (l.startswith("#")):
                     catalog_header.append(l.strip())
-            print(catalog_header)
+            # print(catalog_header)
 
         #
         # Now we can start the actual work
         #
-
         _dir, _fn = os.path.split(udg_cat)
         basename, _ = os.path.splitext(_fn)
-        galfit_dir = os.path.join(_dir, galfit_directory)
+        if (galfit_directory.find(":") > 0):
+            _parts = galfit_directory.split(":")
+            _search = _parts[0]
+            _replace = _parts[1]
+            galfit_dir = img_fn.replace(_search, _replace)
+        else:
+            galfit_dir = os.path.join(_dir, galfit_directory)
+
         # print(galfit_dir)
 
         galfit_data = [None] * catalog.shape[0]
@@ -101,17 +112,17 @@ def parallel_combine(catalog_queue, galfit_directory='galfit'):
 
             galfit_fn = "%s.%05d.galfit.fits" % (basename, src_id)
             galfit_fullfn = os.path.join(galfit_dir, galfit_fn)
-            print(galfit_fullfn)
+            # print(galfit_fullfn)
 
             if (not os.path.isfile(galfit_fullfn)):
-                print("File does not exist - failed fit? (%s)" % (galfit_fullfn))
+                logger.debug("File does not exist - failed fit? (%s)" % (galfit_fullfn))
                 continue
 
             # open the galfit result FITS file
             if (True): #try:
                 hdulist = pyfits.open(galfit_fullfn)
                 hdr = hdulist[2].header
-                print("opened file %s" % (galfit_fullfn))
+                # logger.debug("opened file %s" % (galfit_fullfn))
 
 
                 # now check all components - max # of components is 100
@@ -137,33 +148,33 @@ def parallel_combine(catalog_queue, galfit_directory='galfit'):
                         fit_results.extend(read_results(hdr, component, p))
                         param_labels.append("%s_%d: %s" % (comp_name, component, p))
 
-                print(fit_results)
+                # print(fit_results)
 
                 galfit_data[i_src] = fit_results
 
         # Now check all results for the longest value chain
         # ideally all results should have the same length
         n_parameters = [0 if fr is None else len(fr) for fr in galfit_data]
-        print(n_parameters)
-        print(set(n_parameters))
+        # print(n_parameters)
+        # print(set(n_parameters))
 
         # add additional header information about the galfit columns
         galfit_header = ["# %3d %s" % (3*i+1+catalog.shape[1], pl) for i,pl in enumerate(param_labels)]
-        print(galfit_header)
+        # print(galfit_header)
 
         catalog_header.extend(galfit_header)
-        print(catalog_header)
+        # print(catalog_header)
 
         param_count = numpy.array(list(set(n_parameters)))
-        print(param_count)
+        # print(param_count)
         if (numpy.sum((param_count > 0)) > 1):
-            print("Number of parameters returned from GALFIT do not match")
+            logger.error("Number of parameters returned from GALFIT do not match")
 
         else:
             # We have valid results - all frames either returned 0 parameters
             # (e.g. in the case the fit failed) or the X parameters
             galfit_results = numpy.empty((catalog.shape[0], numpy.max(param_count)))
-            print(galfit_results.shape)
+            # print(galfit_results.shape)
             for i, fr in enumerate(galfit_data):
                 galfit_results[i,:] = numpy.NaN if fr is None else galfit_data[i]
 
@@ -172,11 +183,11 @@ def parallel_combine(catalog_queue, galfit_directory='galfit'):
             combined = numpy.append(catalog, galfit_results, axis=1)
 
             # write output
-            print(catalog_header)
+            # print(catalog_header)
             numpy.savetxt(combined_cat, combined,
                           header="\n".join(catalog_header), comments='')
 
-            print("Combined catalog written to %s" % (combined_cat))
+            logger.info("Combined catalog (%d sources) written to %s" % (catalog.shape[0], combined_cat))
 
             # except:
             #     continue
@@ -205,19 +216,19 @@ if __name__ == "__main__":
                          help="file extension for catalog")
     cmdline.add_argument("--subdir", dest="galfit_directory", type=str, default="galfit/",
                          help="output subdirectory to hold galfit feed-files and output")
-    cmdline.add_argument("input_catalogs", nargs="+",
-                         help="list of input source catalogs")
+    cmdline.add_argument("input_images", nargs="+",
+                         help="list of input images")
     #cmdline.print_help()
     args = cmdline.parse_args()
 
 
     # Feed parallel workers
     catalog_queue = multiprocessing.JoinableQueue()
-    for cat_fn in args.input_catalogs:
-        udg_cat = cat_fn[:-4] + "." + args.catalog_extension #".udgcat"
-        final_cat = cat_fn[:-4] + ".galcomb.cat2"
-        print("Adding %s --> %s" % (cat_fn, udg_cat))
-        catalog_queue.put((cat_fn, udg_cat, final_cat))
+    for img_fn in args.input_images:
+        udg_cat = img_fn[:-5] + "." + args.catalog_extension #".udgcat"
+        final_cat = img_fn[:-5] + ".galcomb.cat2"
+        print("Adding %s --> %s" % (img_fn, udg_cat))
+        catalog_queue.put((img_fn, udg_cat, final_cat))
 
     # insert termination commands
     for i in range(args.number_processes):
