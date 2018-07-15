@@ -37,7 +37,7 @@ def select_from_galfit(catalog):
     print("Not yet implemented")
     return catalog[:]
 
-def parallel_select(catalog_queue, selection=None):
+def parallel_select(catalog_queue, selection=None, redo=False):
 
     if (selection is None):
         selection = 'sextractor'
@@ -60,7 +60,7 @@ def parallel_select(catalog_queue, selection=None):
 
         cat_fn, output_fn, output_reg = cmd
 
-        if (os.path.isfile(output_fn)):
+        if (os.path.isfile(output_fn) and not redo):
             catalog_queue.task_done()
             continue
 
@@ -132,6 +132,8 @@ if __name__ == "__main__":
 
     cmdline.add_argument("--select", dest="selection_mode", type=str, default="sextractor",
                          help="selection mode [sextractor/galfit]")
+    cmdline.add_argument("--redo", dest="redo", default=False, action='store_true',
+                         help="re-run even if output already exists")
 
     # cmdline.add_argument("--exe", dest="sex_exe", default="sex",
     #                      help="location of SExtractor executable")
@@ -175,6 +177,7 @@ if __name__ == "__main__":
             kwargs=dict(
                 catalog_queue=catalog_queue,
                 selection=args.selection_mode,
+                redo=args.redo,
             )
         )
         p.daemon = True
