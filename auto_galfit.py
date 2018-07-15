@@ -86,12 +86,15 @@ def parallel_config_writer(queue, galfit_queue,
             _, _weight = os.path.split(weight_out_fn)
 
         if (segmentation_fn is not None):
-            segm_hdu = pyfits.open(segmentation_fn)
-            segm = segm_hdu[0].data[y1:y2, x1:x2].astype(numpy.int)
-            segm[segm == src_id] = 0
-            pyfits.PrimaryHDU(data=segm, header=phdu.header).writeto(segm_out_fn, clobber=True)
-            segm_hdu.close()
-            _, _bpm = os.path.split(segm_out_fn)
+            try:
+                segm_hdu = pyfits.open(segmentation_fn)
+                segm = segm_hdu[0].data[y1:y2, x1:x2].astype(numpy.int)
+                segm[segm == src_id] = 0
+                pyfits.PrimaryHDU(data=segm, header=phdu.header).writeto(segm_out_fn, clobber=True)
+                segm_hdu.close()
+                _, _bpm = os.path.split(segm_out_fn)
+            except IOError:
+                pass
 
         galfit_info = {
             'imgfile': _img, #img_out_fn, #image_fn,
