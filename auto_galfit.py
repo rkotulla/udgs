@@ -269,8 +269,8 @@ def parallel_run_galfit(galfit_queue, galfit_exe='galfit',
                                   stderr=subprocess.PIPE,
                                   cwd=_cwd) as galfit_process:
                 try:
-                    _stdout, _stderr = galfit_process.communicate(input=None, timeout=30)
-                except (TimeoutError) as e: #TimeoutExpired
+                    _stdout, _stderr = galfit_process.communicate(input=None, timeout=60)
+                except (TimeoutError, subprocess.TimeoutExpired) as e: #TimeoutExpired
                     galfit_process.kill()
                     print("Terminating galfit after timeout")
 
