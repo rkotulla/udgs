@@ -5,7 +5,8 @@ import sys
 import numpy
 import argparse
 import multiprocessing
-
+import scipy
+import scipy.special
 
 def select(catalog):
 
@@ -34,8 +35,56 @@ def select(catalog):
 
 
 def select_from_galfit(catalog):
-    print("Not yet implemented")
-    return catalog[:]
+
+    try:
+        mag_auto = catalog[:, 5]
+        a_image = catalog[:, 16]
+        mu0 = catalog[:, 20]
+
+        r50 = catalog[:, 21]
+        radius_eff = catalog[:, 52]
+        magnitude = catalog[:, 49]
+        sersic = catalog[:, 55]
+        axis_ratio = catalog[:, 58]
+
+    except IndexError:
+        return None
+
+    pixelscale = 0.168
+
+    kappa = 2*sersic - 0.33
+    g = scipy.special.gamma(2*sersic)
+    m = magnitude
+    f_tot = scipy.power(10., -0.4*m)
+    sig_e = f_tot/(2*scipy.pi*(radius_eff**2)*((scipy.e)**kappa)*sersic*(kappa**(-2*sersic))*g*axis_ratio)
+
+    sig_0 = sig_e * numpy.exp(kappa)
+
+    #print("sig_e = %s" % sig_e)
+    #print("sig_0 = %s" % sig_0)
+
+    surfbrite_0 = -2.5*numpy.log10(sig_0) + 5*numpy.log10(pixelscale)
+
+    #print(surfbrite_0)
+
+    # udg = (mag_auto < 24) & (a_image > 5) & (mu0 > 24) & (r50 > 6)
+    udg = (mag_auto < 24) & (mu0 > 24) & (r50 > 6)
+    udg = (surfbrite_0 > 23) & (axis_ratio > 0.5) & (radius_eff > 9)
+
+    # criteria_count = numpy.sum((mag_auto < 24)) + numpy.sum((a_image > 6)) + \
+    #                  numpy.sum((mu0 > 24)) + numpy.sum((r50 > 6))
+    criteria_count = (mag_auto < 24).astype(numpy.int) + \
+                     (a_image > 6).astype(numpy.int) + \
+                     (mu0 > 24).astype(numpy.int) + \
+                     (r50 > 6).astype(numpy.int)
+
+    # print(criteria_count.shape)
+    # udg = (criteria_count >= 3)
+
+    # udg = (numpy.isfinite(surfbrite_0)) & (sersic > 0.8)  & (sersic < 6) & (radius_eff > 8)
+
+    return numpy.append(catalog, surfbrite_0.reshape((-1,1)), axis=1)[udg]
+    # return catalog[udg]
 
 def parallel_select(catalog_queue, selection=None, redo=False):
 
