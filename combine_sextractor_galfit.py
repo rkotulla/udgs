@@ -12,7 +12,7 @@ logsetup.setup_log()
 
 
 
-def read_results(hdr, component, parameter, keyname=None):
+def read_results(hdr, component, parameter, keyname=None, x1=0, y1=0):
 
     value, uncert, flag = numpy.NaN, numpy.NaN, 99
 
@@ -50,10 +50,10 @@ def read_results(hdr, component, parameter, keyname=None):
         except:
             value = numpy.NaN
 
-    if (keyname == "XC" and 'SRC_X1' in hdr):
-        value += hdr['SRC_X1']
-    if (keyname == "YC" and 'SRC_Y1' in hdr):
-        value += hdr['SRC_Y1']
+    if (parameter == "XC"):
+        value += x1 #hdr['SRC_X1']
+    if (parameter == "YC"):
+        value += y1
 
     return [value, uncert, flag]
 
@@ -127,6 +127,9 @@ def parallel_combine(catalog_queue, galfit_directory='galfit'):
             if (True): #try:
                 hdulist = pyfits.open(galfit_fullfn)
                 hdr = hdulist[2].header
+                x1 = hdulist[1].header["SRC_X1"] if "SRC_X1" in hdulist[1].header else 0.0
+                y1 = hdulist[1].header["SRC_Y1"] if "SRC_Y1" in hdulist[1].header else 0.0
+                # print(x1,y1)
                 # logger.debug("opened file %s" % (galfit_fullfn))
 
 
@@ -150,7 +153,7 @@ def parallel_combine(catalog_queue, galfit_directory='galfit'):
                         parameters = ['XC', 'YC', 'SKY', 'DSDX', 'DSDY']
 
                     for p in parameters:
-                        fit_results.extend(read_results(hdr, component, p))
+                        fit_results.extend(read_results(hdr, component, p, x1=x1, y1=y1))
                         param_labels.append("%s_%d: %s" % (comp_name, component, p))
 
                 # print(fit_results)
