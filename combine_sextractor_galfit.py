@@ -125,10 +125,13 @@ def parallel_combine(catalog_queue, galfit_directory='galfit'):
 
             # open the galfit result FITS file
             if (True): #try:
-                hdulist = pyfits.open(galfit_fullfn)
-                hdr = hdulist[2].header
-                x1 = hdulist[1].header["SRC_X1"] if "SRC_X1" in hdulist[1].header else 0.0
-                y1 = hdulist[1].header["SRC_Y1"] if "SRC_Y1" in hdulist[1].header else 0.0
+                try:
+                    hdulist = pyfits.open(galfit_fullfn)
+                    hdr = hdulist[2].header
+                    x1 = hdulist[1].header["SRC_X1"] if "SRC_X1" in hdulist[1].header else 0.0
+                    y1 = hdulist[1].header["SRC_Y1"] if "SRC_Y1" in hdulist[1].header else 0.0
+                except:
+                    continue
                 # print(x1,y1)
                 # logger.debug("opened file %s" % (galfit_fullfn))
 
