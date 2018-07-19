@@ -270,26 +270,29 @@ def parallel_run_galfit(galfit_queue, galfit_exe='galfit',
                                   cwd=_cwd) as galfit_process:
                 try:
                     _stdout, _stderr = galfit_process.communicate(input=None, timeout=60)
+
+
+                    returncode = galfit_process.returncode
+                    if (galfit_process.returncode != 0):
+                        print("return code was not 0 (%d)" % (galfit_process.returncode))
+                        print(str(_stdout))
+                        print(str(_stderr))
+                #print(_stdout)
+
+                    with open(logfile, "wb") as log:
+                        log.write(_stdout)
+                        #log.write("\n*10STDERR\n========\n")
+                        log.write(_stderr)
+
                 except (TimeoutError, subprocess.TimeoutExpired) as e: #TimeoutExpired
                     galfit_process.kill()
                     print("Terminating galfit after timeout")
+                    returncode = -9999999
 
             # ret = subprocess.Popen(galfit_cmd.split(),
             #                        stdout=subprocess.PIPE,
             #                        stderr=subprocess.PIPE)
             # (_stdout, _stderr) = ret.communicate()
-                returncode = galfit_process.returncode
-                if (galfit_process.returncode != 0):
-                    print("return code was not 0 (%d)" % (galfit_process.returncode))
-                    print(str(_stdout))
-                    print(str(_stderr))
-            #print(_stdout)
-
-            with open(logfile, "wb") as log:
-                log.write(_stdout)
-                #log.write("\n*10STDERR\n========\n")
-                log.write(_stderr)
-
             #     break
 
             # sex = subprocess.run(sexcmd.split(), shell=True, check=True,
