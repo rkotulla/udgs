@@ -11,6 +11,7 @@ import time
 import subprocess
 
 import logging
+import shutil
 logging.basicConfig(filename='debug.log',level=logging.DEBUG)
 
 import plot_galfit_results
@@ -31,7 +32,7 @@ def parallel_config_writer(queue, galfit_queue,
         image_fn, feedme_fn, weight_fn, src_info, \
             img_header, galfit_output, galfit_logfile, \
             segmentation_input_fn, galfit_dir, basename, \
-            max_size = cmd
+            max_size, psf_file, psf_superssample = cmd
 
         if (os.path.isfile(feedme_fn)):
             queue.task_done()
@@ -65,6 +66,7 @@ def parallel_config_writer(queue, galfit_queue,
         img_out_fn = "%s/%s.%05d.image.fits" % (galfit_dir, basename, src_id)
         segm_out_fn = "%s/%s.%05d.segm.fits" % (galfit_dir, basename, src_id)
         weight_out_fn = "%s/%s.%05d.sigma.fits" % (galfit_dir, basename, src_id)
+        psf_out_fn = "%s/%s.%05d.psf.fits" % (galfit_dir, basename, src_id)
 
         img_hdu = pyfits.open(image_fn)
         img = img_hdu[0].data[y1:y2, x1:x2]
@@ -96,6 +98,13 @@ def parallel_config_writer(queue, galfit_queue,
             except IOError:
                 pass
 
+        if (psf_file is not None and os.path.isfile(psf_file)):
+            # copy the PSF model
+            shutil.copyfile(psf_file, psf_out_fn)
+            _, galfit_psf_option = os.path.split(psf_out_fn)
+        else:
+            galfit_psf_option = 'none'
+
         galfit_info = {
             'imgfile': _img, #img_out_fn, #image_fn,
             'srcid': src_id,
@@ -107,14 +116,16 @@ def parallel_config_writer(queue, galfit_queue,
             'weight_image': _weight, #weight_out_fn if weight_fn is not None else 'none',
             'galfit_output': _out, #galfit_output,
             'bpm': _bpm, #segm_out_fn if segmentation_fn is not None else 'none',
+            'psf': galfit_psf_option,
+            'psf_supersample': psf_superssample,
         }
 
         head_block = """
             A) %(imgfile)s         # Input data image (FITS file)
             B) %(galfit_output)s   # Output data image block
             C) %(weight_image)s                # Sigma image name (made from data if blank or "none") 
-            D) psf.fits   #        # Input PSF image and (optional) diffusion kernel
-            E) 1                   # PSF fine sampling factor relative to data 
+            D) %(psf)s   #        # Input PSF image and (optional) diffusion kernel
+            E) %(psf_supersample).1ff                   # PSF fine sampling factor relative to data 
             F) %(bpm)s                # Bad pixel mask (FITS image or ASCII coord list)
             G) none                # File with parameter constraints (ASCII file) 
             H) %(x1)d %(x2)d %(y1)d %(y2)d   # Image region to fit (xmin xmax ymin ymax)
@@ -504,6 +515,11 @@ if __name__ == "__main__":
     cmdline.add_argument("--maxsize", dest="max_size", default=-1, type=int,
                          help="maximum cutout size for fitting")
 
+    cmdline.add_argument("--psf", dest="psf", default=None, type=str,
+                         help="filename of PSF model")
+    cmdline.add_argument("--psfres", dest="psf_supersample", default=1, type=float,
+                         help="super-sample factor of PSF model")
+
     cmdline.add_argument("input_images", nargs="+",
                          help="list of input images")
     #cmdline.print_help()
@@ -603,6 +619,7 @@ if __name__ == "__main__":
                 galfit_dir,
                 basename,
                 args.max_size,
+                args.psf, args.psf_supersample,
             ))
             # print(src)
 
