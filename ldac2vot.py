@@ -58,6 +58,8 @@ def fitsldac2vot(ldac_fn, vot_fn=None, array_suffix=None):
             del(cat[col])
 
     print(cat.colnames)
+    if (vot_fn is not None):
+        cat.write(vot_fn, format='votable', overwrite=True)
 
     return cat
 
