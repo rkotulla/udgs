@@ -7,7 +7,9 @@ import argparse
 import multiprocessing
 import time
 
-def run_sex(file_queue, sex_exe, sex_conf, sex_param):
+import ldac2vot
+
+def run_sex(file_queue, sex_exe, sex_conf, sex_param, fix_vot_array=None):
 
     while (True):
 
@@ -19,12 +21,13 @@ def run_sex(file_queue, sex_exe, sex_conf, sex_param):
 
 
         img_fn, weight_fn = opts
-        cat_file = img_fn[:-5]+".cat"
+        ldac_file = img_fn[:-5]+".fitsldac"
         seg_file = img_fn[:-5]+".segments"
+        cat_file = img_fn[:-5]+".vot"
 
         fits_file = img_fn
 
-        if (os.path.isfile(cat_file)):
+        if (os.path.isfile(cat_file) and os.path.isfile(ldac_file)):
             file_queue.task_done()
             continue
             
@@ -40,13 +43,13 @@ def run_sex(file_queue, sex_exe, sex_conf, sex_param):
         -PARAMETERS_NAME %s 
         %s 
         -CATALOG_NAME %s 
-        -CATALOG_TYPE ASCII_HEAD
+        -CATALOG_TYPE FITS_LDAC
         -CHECKIMAGE_TYPE SEGMENTATION
         -CHECKIMAGE_NAME %s 
         %s """ % (
             sex_exe, sex_conf, sex_param,
             weight_opts,
-            cat_file,
+            ldac_file,
             seg_file,
             fits_file)
         # print(" ".join(sexcmd.split()))
@@ -76,6 +79,10 @@ def run_sex(file_queue, sex_exe, sex_conf, sex_param):
         end_time = time.time()
         print("SourceExtractor returned after %.3f seconds" % (end_time - start_time))
 
+        # Now convert the FITS-LDAC catalog to VOTable format
+        ldac2vot.fitsldac2vot(ldac_file, vot_fn=cat_file,
+                              array_suffix=fix_vot_array)
+
         file_queue.task_done()
 
 
@@ -95,12 +102,19 @@ if __name__ == "__main__":
                          help="location of SExtractor executable")
     cmdline.add_argument("--weight", dest='weight_image', type=str, default=None,
                          help="weight map")
+    cmdline.add_argument("--votfix", dest='fix_vot_arrays', type=str, default=None,
+                         help="rename arrays when converting FITS-LDAC to VOTable")
     cmdline.add_argument("input_images", nargs="+",
                          help="list of input images")
     #cmdline.print_help()
     args = cmdline.parse_args()
 
-    construct_weight_fn = (args.weight_image.find(":") > 0)
+    construct_weight_fn = False
+    if (args.weight_image is not None):
+        construct_weight_fn = (args.weight_image.find(":") > 0)
+
+    fix_vot_array = ldac2vot.read_definitions(args.fix_vot_arrays)
+    print(fix_vot_array)
 
     file_queue = multiprocessing.JoinableQueue()
 
@@ -131,6 +145,7 @@ if __name__ == "__main__":
                 file_queue=file_queue,
                 sex_exe=args.sex_exe,
                 sex_conf=args.sex_conf, sex_param=args.sex_params,
+                fix_vot_array=fix_vot_array
             )
         )
         p.daemon = True
