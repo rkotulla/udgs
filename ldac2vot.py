@@ -18,11 +18,11 @@ def read_definitions(definitions):
         return array_suffix
 
     array_names = definitions.split("::")
-    print(array_names)
+    # print(array_names)
     for item_def in array_names:
         key = item_def.split(":")[0]
         values = item_def.split(":")[1].split(",")
-        print(key, values)
+        # print(key, values)
         array_suffix[key] = values
 
     return array_suffix
@@ -36,14 +36,14 @@ def fitsldac2vot(ldac_fn, vot_fn=None, array_suffix=None):
     cat = astropy.table.Table(ldac_data)
     #print(cat.info())
 
-    print("===\n"*5)
+    # print("===\n"*5)
 
     # now convert arrays to multiple columns
     for col in cat.colnames:
         if (col is not None):
             print(col)
 
-        print(cat[col].shape, cat[col].ndim)
+        # print(cat[col].shape, cat[col].ndim)
 
         if (cat[col].ndim == 2):
             for idx in range(cat[col].shape[1]):
@@ -57,7 +57,7 @@ def fitsldac2vot(ldac_fn, vot_fn=None, array_suffix=None):
                 cat[new_colname] = cat[col][:,idx]
             del(cat[col])
 
-    print(cat.colnames)
+    # print(cat.colnames)
     if (vot_fn is not None):
         cat.write(vot_fn, format='votable', overwrite=True)
 
