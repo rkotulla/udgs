@@ -8,6 +8,8 @@ import multiprocessing
 import scipy
 import scipy.special
 
+import astropy.table
+
 def select(catalog):
 
     try:
@@ -86,6 +88,9 @@ def select_from_galfit(catalog):
     return numpy.append(catalog, surfbrite_0.reshape((-1,1)), axis=1)[udg]
     # return catalog[udg]
 
+def select_all(catalog):
+    return catalog
+
 def parallel_select(catalog_queue, selection=None, redo=False):
 
     if (selection is None):
@@ -95,6 +100,8 @@ def parallel_select(catalog_queue, selection=None, redo=False):
     if (selection == 'galfit'):
         print("Using Amy's selection function")
         selector_fct = select_from_galfit
+    elif (selection == "all"):
+        selector_fct = select_all
     else:
         selector_fct = select
 
@@ -114,26 +121,27 @@ def parallel_select(catalog_queue, selection=None, redo=False):
             continue
 
         try:
-            catalog = numpy.loadtxt(cat_fn)
+            # catalog = numpy.loadtxt(cat_fn)
+            catalog = astropy.table.Table.read(cat_fn)
         except:
             print("Error opening %s" % (cat_fn))
             catalog_queue.task_done()
             continue
 
-        if (catalog.ndim < 2 or catalog.shape[0] <= 0):
-            print("Error with catalog %s" % (cat_fn))
-            catalog_queue.task_done()
-            continue
+        # if (catalog.ndim < 2 or catalog.shape[0] <= 0):
+        #     print("Error with catalog %s" % (cat_fn))
+        #     catalog_queue.task_done()
+        #     continue
 
-        # Now that we have the data, also read all the header information
-        with open(cat_fn, "r") as  cf:
-            lines = cf.readlines()
-            header = []
-            for l in lines:
-                if (l.startswith("#")):
-                    header.append(l.strip())
-            # header = [l if l.startswith("#") for l in lines]
-        # print("header:\n", header)
+        # # Now that we have the data, also read all the header information
+        # with open(cat_fn, "r") as  cf:
+        #     lines = cf.readlines()
+        #     header = []
+        #     for l in lines:
+        #         if (l.startswith("#")):
+        #             header.append(l.strip())
+        #     # header = [l if l.startswith("#") for l in lines]
+        # # print("header:\n", header)
 
         udg_candidates = selector_fct(catalog)
 
@@ -142,21 +150,26 @@ def parallel_select(catalog_queue, selection=None, redo=False):
             catalog_queue.task_done()
             continue
 
-        print(cat_fn, catalog.shape, "-->", udg_candidates.shape)
+        print(cat_fn, catalog.as_array().shape[0], "-->", udg_candidates.as_array().shape[0])
 
-        numpy.savetxt(output_fn, udg_candidates,
-                      header="\n".join(header), comments='')
+        # numpy.savetxt(output_fn, udg_candidates,
+        #               header="\n".join(header), comments='')
+        udg_candidates.write(output_fn, format='votable')
 
-        if (output_reg is not None):
-            with open(output_reg, "w") as reg:
-                print(output_reg)
-                hdr = """# Region file format: DS9 version 4.1
-                         global color=green dashlist=8 3 width=1 font="helvetica 10 normal roman" select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1
-                         fk5"""
-                reg.write("\n".join([a.strip() for a in hdr.splitlines()]))
+        try:
+            if (output_reg is not None):
+                with open(output_reg, "w") as reg:
+                    print(output_reg)
+                    hdr = """# Region file format: DS9 version 4.1
+                             global color=green dashlist=8 3 width=1 font="helvetica 10 normal roman" select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1
+                             fk5"""
+                    reg.write("\n".join([a.strip() for a in hdr.splitlines()]))
 
-                labels = ["""# text(%f,%+f) font="helvetica 14 normal roman" text={%d}""" % (src[0], src[1], src[2]) for src in udg_candidates]
-                reg.write("\n".join(labels))
+                    labels = ["""# text(%f,%+f) font="helvetica 14 normal roman" text={%d}""" % (
+                        src['ALPHA_J2000'], src['DELTA_J2000'], src['NUMBER']) for src in udg_candidates]
+                    reg.write("\n".join(labels))
+        except:
+            pass
 
         catalog_queue.task_done()
 
