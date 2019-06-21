@@ -16,6 +16,8 @@ logging.basicConfig(filename='debug.log',level=logging.DEBUG)
 
 import plot_galfit_results
 
+import astropy.table
+
 
 def parallel_config_writer(queue, galfit_queue,
                            n_galfeeds, n_galfit_queuesize):
@@ -32,9 +34,11 @@ def parallel_config_writer(queue, galfit_queue,
         image_fn, feedme_fn, weight_fn, src_info, \
             img_header, galfit_output, galfit_logfile, \
             segmentation_input_fn, galfit_dir, basename, \
-            max_size, psf_file, psf_superssample = cmd
+            max_size, psf_file, psf_superssample, \
+            magzero = cmd
 
         if (os.path.isfile(feedme_fn)):
+            print("Skipping existing feed-file %s" % (feedme_fn))
             queue.task_done()
             if (n_galfit_queuesize is not None):
                 with n_galfit_queuesize.get_lock():
@@ -45,18 +49,16 @@ def parallel_config_writer(queue, galfit_queue,
             galfit_queue.put((feedme_fn, galfit_output, galfit_logfile))
             continue
 
-        magzero = 2.5 * numpy.log10(img_header['FLUXMAG0'])
-
         #
         # Create the galfit feedme file, the cutouts for the
         # image, weight-image, and segmentation mask
         #
-        fwhm = src_info[9]
-        src_id = int(src_info[2])
+        fwhm = src_info['FWHM_IMAGE']
+        src_id = int(src_info['NUMBER'])
         size = 3 * fwhm
         if (max_size > 0 and size > max_size): size = max_size
 
-        x, y = src_info[3]-1, src_info[4]-1
+        x, y = src_info['X_IMAGE']-1, src_info['Y_IMAGE']-1
         x1 = int(numpy.max([0, x - size]))
         x2 = int(numpy.min([x + size, img_header['NAXIS1']]))
         y1 = int(numpy.max([0, y - size]))
@@ -138,14 +140,15 @@ def parallel_config_writer(queue, galfit_queue,
         """ % (galfit_info)
             # print(head_block)
 
+        posangle = 90 - src_info['THETA_IMAGE']
         src_info = {
             'x': x-x1,
             'y': y-y1,
-            'magnitude': src_info[5],  # +magzero,
-            'halflight_radius': src_info[21],
+            'magnitude': src_info['MAG_AUTO'],  # +magzero,
+            'halflight_radius': src_info['FLUX_RADIUS_50'],
             'sersic_n': 1.5, #src[7],
-            'axis_ratio': src_info[17] / src_info[16],
-            'position_angle': src_info[18],
+            'axis_ratio': src_info['ELONGATION'],
+            'position_angle': posangle,
 
         }
         object_block = """
@@ -257,6 +260,7 @@ def parallel_run_galfit(galfit_queue, galfit_exe='galfit',
         # continue
 
         if (os.path.isfile(galfit_output_fn) and not redo):
+            print("Skipping galfit run for completed file (%s)" % (galfit_output_fn))
             if (n_galfit_queuesize is not None):
                 with n_galfit_queuesize.get_lock():
                     n_galfit_queuesize.value -= 1
@@ -548,6 +552,11 @@ if __name__ == "__main__":
         # open input image
         hdulist = pyfits.open(fn)
 
+        try:
+            magzero = 2.5 * numpy.log10(hdulist[0].header['FLUXMAG0'])
+        except:
+            magzero = 0
+
         # construct all filenames we need
         bn,_ = os.path.splitext(fn)
         #basename = os.path.split(bn)
@@ -563,11 +572,13 @@ if __name__ == "__main__":
             print("Unable to open catalog %s" % (catalog_fn))
             continue
 
-        catalog = numpy.loadtxt(catalog_fn)
+        # catalog = numpy.loadtxt(catalog_fn)
+        catalog = astropy.table.Table.read(catalog_fn)
         print("done loading catalog")
 
+
         for src in catalog:
-            src_id = int(src[2])
+            src_id = int(src['NUMBER'])
             feedme_fn = "%s.%05d.galfeed" % (basename, src_id)
 
             if (args.galfit_directory.find(":") >= 0):
@@ -620,6 +631,7 @@ if __name__ == "__main__":
                 basename,
                 args.max_size,
                 args.psf, args.psf_supersample,
+                magzero,
             ))
             # print(src)
 
