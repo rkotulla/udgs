@@ -40,8 +40,6 @@ def fitsldac2vot(ldac_fn, vot_fn=None, array_suffix=None):
 
     # now convert arrays to multiple columns
     for col in cat.colnames:
-        if (col is not None):
-            print(col)
 
         # print(cat[col].shape, cat[col].ndim)
 
