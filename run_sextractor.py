@@ -7,6 +7,8 @@ import argparse
 import multiprocessing
 import time
 
+import astropy.io.fits as pyfits
+import numpy
 import ldac2vot
 
 def run_sex(file_queue, sex_exe, sex_conf, sex_param, fix_vot_array=None):
@@ -33,6 +35,12 @@ def run_sex(file_queue, sex_exe, sex_conf, sex_param, fix_vot_array=None):
             
         print("running sex on %s" % (img_fn))
 
+        hdu = pyfits.open(img_fn)
+        try:
+            magzero = 2.5*numpy.log10(hdu[0].header['FLUXMAG0'])
+        except:
+            magzero = 0
+
         if (weight_fn is None):
             weight_opts = "-WEIGHT_TYPE NONE"
         else:
@@ -45,12 +53,14 @@ def run_sex(file_queue, sex_exe, sex_conf, sex_param, fix_vot_array=None):
         -CATALOG_NAME %s 
         -CATALOG_TYPE FITS_LDAC
         -CHECKIMAGE_TYPE SEGMENTATION
-        -CHECKIMAGE_NAME %s 
+        -CHECKIMAGE_NAME %s
+        -MAG_ZEROPOINT %.4f 
         %s """ % (
             sex_exe, sex_conf, sex_param,
             weight_opts,
             ldac_file,
             seg_file,
+            magzero,
             fits_file)
         # print(" ".join(sexcmd.split()))
 
