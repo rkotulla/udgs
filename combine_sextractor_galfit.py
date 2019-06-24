@@ -160,6 +160,8 @@ def parallel_combine(catalog_queue, galfit_directory='galfit'):
                         param_labels.append("%s_%d: %s" % (comp_name, component, p))
 
                 # print(fit_results)
+                if (len(fit_results) != 51):
+                    continue
 
                 galfit_data[i_src] = fit_results
 
@@ -180,6 +182,7 @@ def parallel_combine(catalog_queue, galfit_directory='galfit'):
         # print(param_count)
         if (numpy.sum((param_count > 0)) > 1):
             logger.error("Number of parameters returned from GALFIT do not match")
+            print(param_count)
 
         else:
             # We have valid results - all frames either returned 0 parameters
