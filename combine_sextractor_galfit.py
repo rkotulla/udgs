@@ -181,55 +181,56 @@ def parallel_combine(catalog_queue, galfit_directory='galfit', components=None):
                     hdr = hdulist[2].header
                     x1 = hdulist[1].header["SRC_X1"] if "SRC_X1" in hdulist[1].header else 0.0
                     y1 = hdulist[1].header["SRC_Y1"] if "SRC_Y1" in hdulist[1].header else 0.0
-                except:
-                    print("There was a problem getting SRC_X1")
-                    continue
 
-                # print(x1,y1)
-                # logger.debug("opened file %s" % (galfit_fullfn))
+                    # print(x1,y1)
+                    # logger.debug("opened file %s" % (galfit_fullfn))
 
-                # Now read all Galfit results from file header and insert
-                # into the catalog
-                header = hdulist[2].header
-                for (header_key, catalog_key) in keylist:
+                    # Now read all Galfit results from file header and insert
+                    # into the catalog
+                    header = hdulist[2].header
+                    for (header_key, catalog_key) in keylist:
 
-                    if (len(catalog_key) == 1):
-                        # there is only a fixed value
-                        # print(catalog_key, header_key)
-                        catalog[catalog_key[0]][i_src] = header[header_key]
-                    else:
-                        # there are two values (value and uncertainty)
-                        value_key, error_key = catalog_key
-                        error = numpy.NaN
-
-                        fits_value = header[header_key]
-
-                        if (fits_value.startswith("[")):
-                            # value is of form 2_XC = '[54.0000]'
-                            value = float(fits_value.split("[")[1].split("]")[0])
-
-                        elif (fits_value.find("+/-") > 0):
-                            # value looks like
-                            # 1_XC    = '55.3318 +/- 0.4551'
-                            items = [f.strip() for f in fits_value.split("+/-")]
-                            # check if any of the items is problematic
-                            problematic = numpy.array([f.startswith("*") for f in items]).any()
-                            if (problematic):
-                                # print(items)
-                                pass
-                            else:
-                                value = float(items[0])
-                                error = float(items[1])
-
+                        if (len(catalog_key) == 1):
+                            # there is only a fixed value
+                            # print(catalog_key, header_key)
+                            catalog[catalog_key[0]][i_src] = header[header_key]
                         else:
-                            print("Unable to understand Galfit Result: %s = %s (%s)" % (
-                                header_key, fits_value, galfit_fullfn
-                            ))
-                            continue
+                            # there are two values (value and uncertainty)
+                            value_key, error_key = catalog_key
+                            error = numpy.NaN
 
-                        catalog[value_key][i_src] = value
-                        catalog[error_key][i_src] = error
-                        # print("Setting %s[%d] --> %f %f" % (header_key, i_src, value, error))
+                            fits_value = header[header_key]
+
+                            if (fits_value.startswith("[")):
+                                # value is of form 2_XC = '[54.0000]'
+                                value = float(fits_value.split("[")[1].split("]")[0])
+
+                            elif (fits_value.find("+/-") > 0):
+                                # value looks like
+                                # 1_XC    = '55.3318 +/- 0.4551'
+                                items = [f.strip() for f in fits_value.split("+/-")]
+                                # check if any of the items is problematic
+                                problematic = numpy.array([f.startswith("*") for f in items]).any()
+                                if (problematic):
+                                    # print(items)
+                                    pass
+                                else:
+                                    value = float(items[0])
+                                    error = float(items[1])
+
+                            else:
+                                print("Unable to understand Galfit Result: %s = %s (%s)" % (
+                                    header_key, fits_value, galfit_fullfn
+                                ))
+                                continue
+
+                            catalog[value_key][i_src] = value
+                            catalog[error_key][i_src] = error
+                            # print("Setting %s[%d] --> %f %f" % (header_key, i_src, value, error))
+
+                except:
+                    print("There was a problem reading %s" % (galfit_fullfn))
+                    continue
 
                 # # now check all components - max # of components is 100
                 # fit_results = []
