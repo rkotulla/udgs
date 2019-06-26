@@ -120,6 +120,7 @@ def parallel_config_writer(queue, galfit_queue,
             'bpm': _bpm, #segm_out_fn if segmentation_fn is not None else 'none',
             'psf': galfit_psf_option,
             'psf_supersample': psf_superssample,
+            'magzero': magzero,
         }
 
         head_block = """
@@ -132,7 +133,7 @@ def parallel_config_writer(queue, galfit_queue,
             G) none                # File with parameter constraints (ASCII file) 
             H) %(x1)d %(x2)d %(y1)d %(y2)d   # Image region to fit (xmin xmax ymin ymax)
             I) 100    100          # Size of the convolution box (x y)
-            J) 26.000              # Magnitude photometric zeropoint 
+            J) %(magzero).3f              # Magnitude photometric zeropoint 
             K) %(pixelscale).3f %(pixelscale).3f            # Plate scale (dx dy)    [arcsec per pixel]
             O) regular             # Display type (regular, curses, both)
             P) 0                   # Choose: 0=optimize, 1=model, 2=imgblock, 3=subcomps
