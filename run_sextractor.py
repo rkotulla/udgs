@@ -34,7 +34,7 @@ def run_sex(file_queue, sex_exe, sex_conf, sex_param, fix_vot_array=None):
             continue
             
         print("running sex on %s" % (img_fn))
-
+        
         hdu = pyfits.open(img_fn)
         try:
             magzero = 2.5*numpy.log10(hdu[0].header['FLUXMAG0'])
@@ -54,6 +54,7 @@ def run_sex(file_queue, sex_exe, sex_conf, sex_param, fix_vot_array=None):
         -CATALOG_TYPE FITS_LDAC
         -CHECKIMAGE_TYPE SEGMENTATION
         -CHECKIMAGE_NAME %s
+        -WEIGHT_THRESH 1e8
         -MAG_ZEROPOINT %.4f 
         %s """ % (
             sex_exe, sex_conf, sex_param,
