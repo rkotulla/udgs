@@ -574,8 +574,13 @@ if __name__ == "__main__":
             continue
 
         # catalog = numpy.loadtxt(catalog_fn)
-        catalog = astropy.table.Table.read(catalog_fn)
-        print("done loading catalog")
+        try:
+            catalog = astropy.table.Table.read(catalog_fn)
+            print("done loading catalog")
+        except:
+            print("Unable to open catalog %s" % (catalog_fn))
+            continue
+
 
 
         for src in catalog:
