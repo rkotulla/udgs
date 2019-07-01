@@ -88,22 +88,59 @@ def select_from_galfit(catalog):
     return numpy.append(catalog, surfbrite_0.reshape((-1,1)), axis=1)[udg]
     # return catalog[udg]
 
-def select_all(catalog):
-    return catalog
+#This is where I need to input my criteria
+
+def select_maybeUDG(catalog):
+
+    try:
+        mean_surface_brightness_flux = (catalog['FLUX_AUTO'] / 2) / catalog['FLUX_RADIUS_50']
+        mean_surface_brightness = -2.5*numpy.log10(mean_surface_brightness_flux)
+        
+        catalog['MEAN_SB'] = mean_surface_brightness
+        catalog['MEAN_SB_FLUX'] = mean_surface_brightness_flux
+
+        select = \
+            (catalog['CLASS_STAR'] < 0.9) & \
+            (catalog['CLASS_STAR'] > 0.00031974) & \
+            (catalog['MU_MAX'] < 29.672) & \
+            (catalog['MAG_AUTO'] < 35) & \
+            (catalog['KRON_RADIUS'] > 0) & \
+            (catalog['FWHM_IMAGE'] > 5) & \
+            (catalog['FWHM_IMAGE'] < 256) & \
+            (catalog['PETRO_RADIUS'] > 0) & \
+            (catalog['FLAGS'] < 4) & \
+            (catalog['MEAN_SB'] < 0.03) & \
+            (catalog['MEAN_SB'] > -7) & \
+            (catalog['A_IMAGE'] > 2.94) & \
+            (catalog['ELONGATION'] < 2.64) & \
+            (catalog['FLUX_AUTO'] > 7) & \
+            (catalog['FLUX_RADIUS_50'] > 4.5)
+                 
+    except:
+        pass
+        return None
+
+    #print(catalog['NUMBER'].shape, numpy.sum(select))
+    final_catalog = catalog[select]
+#    if(os.path.isfile(output_fn)):
+#        os.remove(output_fn)
+#    final_catalog.write(output_fn, format='votable')
+    return final_catalog
 
 def parallel_select(catalog_queue, selection=None, redo=False):
 
     if (selection is None):
         selection = 'sextractor'
 
-    print(selection)
+    #print(selection)
     if (selection == 'galfit'):
         print("Using Amy's selection function")
         selector_fct = select_from_galfit
     elif (selection == "all"):
         selector_fct = select_all
-    else:
-        selector_fct = select
+    elif (selection == "maybeUDGs"):
+        print("Using maybeUDGs for selection")
+        selector_fct = select_maybeUDG
 
 
     # print("Hello from worker")
