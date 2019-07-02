@@ -99,6 +99,8 @@ def parallel_config_writer(queue, galfit_queue,
                 _, _bpm = os.path.split(segm_out_fn)
             except IOError:
                 pass
+        else:
+            print("Unable to generate source mask from segmentation file (%s)" % (segmentation_fn))
 
         if (psf_file is not None and os.path.isfile(psf_file)):
             # copy the PSF model
