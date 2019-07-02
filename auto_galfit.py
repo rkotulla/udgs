@@ -148,7 +148,7 @@ def parallel_config_writer(queue, galfit_queue,
             'magnitude': src_info['MAG_AUTO'],  # +magzero,
             'halflight_radius': src_info['FLUX_RADIUS_50'],
             'sersic_n': 1.5, #src[7],
-            'axis_ratio': src_info['ELONGATION'],
+            'axis_ratio': 1./src_info['ELONGATION'],  #sextractur uses a/b, galfit needs b/a
             'position_angle': posangle,
 
         }
