@@ -1,0 +1,39 @@
+#I am trying to figure out how to write the histogram script with git; if this is me doing it wrong, I'm sorry 
+
+#Sara Kostmayer July 14, 2019
+#draft script for 2d histogram of 1367 final catalog data
+
+#calling all the libraries
+
+from numpy import c_
+import numpy as np
+import matplotlib.pyplot as plt
+import random
+
+
+#Data defining
+
+#some way to open and read the .vot of galfit2? and maybe an if statement
+# to select only those points with proper SERSIC_ER?
+
+catalog = /sas2/reu2019sara/abell1367/combined_galfit2.vot
+
+lim = (catalog['SERSIC_ER'])
+y = (catalog['DELTA_J2000'])
+x = (catalog['ALPHA_J2000'])
+
+
+#doing plotting
+
+#would it be best to have a limiting if statement before plotting
+#or to have a limiting if statement write another catalog??
+
+if lim > 15:
+    plt.hist2d(x,y, bins = 50)
+    plt.colorbar()
+    plt.title("Abell 1367 Density Plot")
+
+    plt.savefig('abell1367_density_practice.png', bbox_inches = 'tight')
+    plt.close()
+
+#this is not done
