@@ -69,6 +69,8 @@ def parallel_config_writer(queue, galfit_queue,
         segm_out_fn = "%s/%s.%05d.segm.fits" % (galfit_dir, basename, src_id)
         weight_out_fn = "%s/%s.%05d.sigma.fits" % (galfit_dir, basename, src_id)
         psf_out_fn = "%s/%s.%05d.psf.fits" % (galfit_dir, basename, src_id)
+        constraints_opt = "%s.%05d.constraints" % (basename, src_id)
+        constraints_fn = "%s/%s" % (galfit_dir, constraints_opt)
 
         img_hdu = pyfits.open(image_fn)
         img = img_hdu[0].data[y1:y2, x1:x2]
@@ -109,6 +111,24 @@ def parallel_config_writer(queue, galfit_queue,
         else:
             galfit_psf_option = 'none'
 
+
+        #
+        # Generate the constraints file
+        #
+        dx = numpy.min([2., 3 * numpy.sqrt(src_info['ERRX2WIN_IMAGE']) + 1.])
+        dy = numpy.min([2., 3 * numpy.sqrt(src_info['ERRY2WIN_IMAGE']) + 1.])
+        with open(constraints_fn, "w") as cf:
+            constraints = """
+                1   x   %(dx).2f %(dx).2f
+                1   y   %(dy).2f %(dy).2f    
+                        
+            """ % {
+                'dx': dx,
+                'dy': dy,
+            }
+            cf.write("\n".join([c.strip() for c in constraints.splitlines(keepends=False)]))
+
+
         galfit_info = {
             'imgfile': _img, #img_out_fn, #image_fn,
             'srcid': src_id,
@@ -123,6 +143,7 @@ def parallel_config_writer(queue, galfit_queue,
             'psf': galfit_psf_option,
             'psf_supersample': psf_superssample,
             'magzero': magzero,
+            'constraints': constraints_opt,
         }
 
         head_block = """
@@ -132,7 +153,7 @@ def parallel_config_writer(queue, galfit_queue,
             D) %(psf)s   #        # Input PSF image and (optional) diffusion kernel
             E) %(psf_supersample).1ff                   # PSF fine sampling factor relative to data 
             F) %(bpm)s                # Bad pixel mask (FITS image or ASCII coord list)
-            G) none                # File with parameter constraints (ASCII file) 
+            G) %(constraints)s                # File with parameter constraints (ASCII file) 
             H) %(x1)d %(x2)d %(y1)d %(y2)d   # Image region to fit (xmin xmax ymin ymax)
             I) 100    100          # Size of the convolution box (x y)
             J) %(magzero).3f              # Magnitude photometric zeropoint 
