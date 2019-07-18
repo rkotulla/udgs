@@ -17,7 +17,7 @@ logging.basicConfig(filename='debug.log',level=logging.DEBUG)
 import plot_galfit_results
 
 import astropy.table
-
+import shutil
 
 def parallel_config_writer(queue, galfit_queue,
                            n_galfeeds, n_galfit_queuesize):
@@ -34,7 +34,7 @@ def parallel_config_writer(queue, galfit_queue,
         image_fn, feedme_fn, weight_fn, src_info, \
             img_header, galfit_output, galfit_logfile, \
             segmentation_input_fn, galfit_dir, basename, \
-            max_size, psf_file, psf_superssample, \
+            max_size, psf_file, psf_supersample, \
             magzero = cmd
 
         if (os.path.isfile(feedme_fn)):
@@ -68,9 +68,9 @@ def parallel_config_writer(queue, galfit_queue,
         img_out_fn = "%s/%s.%05d.image.fits" % (galfit_dir, basename, src_id)
         segm_out_fn = "%s/%s.%05d.segm.fits" % (galfit_dir, basename, src_id)
         weight_out_fn = "%s/%s.%05d.sigma.fits" % (galfit_dir, basename, src_id)
-        psf_out_fn = "%s/%s.%05d.psf.fits" % (galfit_dir, basename, src_id)
         constraints_opt = "%s.%05d.constraints" % (basename, src_id)
         constraints_fn = "%s/%s" % (galfit_dir, constraints_opt)
+        psf_out_fn = "%s/%s.%05d.psf.fits" % (galfit_dir, basename, src_id)
 
         img_hdu = pyfits.open(image_fn)
         img = img_hdu[0].data[y1:y2, x1:x2]
@@ -108,6 +108,15 @@ def parallel_config_writer(queue, galfit_queue,
             # copy the PSF model
             shutil.copyfile(psf_file, psf_out_fn)
             _, galfit_psf_option = os.path.split(psf_out_fn)
+
+            if (psf_supersample <= 0):
+                # this is meant to be auto-scaled
+                try:
+                    psf_hdu = open(psf_out_fn)
+                    psf_supersample = psf_hdu[0].header['SUPERSMP']
+                    psf_hdu.close()
+                except:
+                    psf_supersample = 1.
         else:
             galfit_psf_option = 'none'
 
@@ -141,7 +150,7 @@ def parallel_config_writer(queue, galfit_queue,
             'galfit_output': _out, #galfit_output,
             'bpm': _bpm, #segm_out_fn if segmentation_fn is not None else 'none',
             'psf': galfit_psf_option,
-            'psf_supersample': psf_superssample,
+            'psf_supersample': psf_supersample,
             'magzero': magzero,
             'constraints': constraints_opt,
         }
@@ -151,7 +160,7 @@ def parallel_config_writer(queue, galfit_queue,
             B) %(galfit_output)s   # Output data image block
             C) %(weight_image)s                # Sigma image name (made from data if blank or "none") 
             D) %(psf)s   #        # Input PSF image and (optional) diffusion kernel
-            E) %(psf_supersample).1ff                   # PSF fine sampling factor relative to data 
+            E) %(psf_supersample).1f                   # PSF fine sampling factor relative to data 
             F) %(bpm)s                # Bad pixel mask (FITS image or ASCII coord list)
             G) %(constraints)s                # File with parameter constraints (ASCII file) 
             H) %(x1)d %(x2)d %(y1)d %(y2)d   # Image region to fit (xmin xmax ymin ymax)
@@ -632,6 +641,33 @@ if __name__ == "__main__":
             else:
                 weight_file = args.weight_file
 
+            #
+            # also construct the appropriate filename for the PSF
+            #
+            if (args.psf is not None):
+                if (args.psf.find(":") >= 0):
+                    # we need to do some replacing here
+                    _parts = args.psf.split(":")
+                    _search = _parts[0]
+                    _replace = _parts[1]
+                    psf_file = fn.replace(_search, _replace)
+                else:
+                    psf_file = args.psf
+            else:
+                psf_file = None
+
+            #
+            # Read PSF supersampling from PSF-file if available or default to 1
+            #
+            psf_supersample = 1.
+            if (args.psf_supersample == 0 and psf_file is not None):
+                try:
+                    psf_hdu = pyfits.open(psf_file)
+                    psf_supersample = 1./psf_hdu[0].header['PSF_SAMP']
+                    psf_hdu.close()
+                except:
+                    pass
+
             feedme_fullfn = os.path.join(galfit_dir, feedme_fn)
             # print(feedme_fullfn)
 
@@ -659,7 +695,7 @@ if __name__ == "__main__":
                 galfit_dir,
                 basename,
                 args.max_size,
-                args.psf, args.psf_supersample,
+                psf_file, psf_supersample,
                 magzero,
             ))
             # print(src)
