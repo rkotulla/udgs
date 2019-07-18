@@ -37,7 +37,7 @@ def plot_galfit_result(fits_fn, plot_fn, scaling_mode='asinh', badpixelmask=None
     output_array[output_array <= 0] = 0.
     output_array[output_array >= 1] = 1.0
 
-    print(badpixelmask)
+    # print(badpixelmask)
     if (badpixelmask is not None and os.path.isfile(badpixelmask)):
 
         print("Found bad pixel mask")
@@ -59,7 +59,7 @@ def plot_galfit_result(fits_fn, plot_fn, scaling_mode='asinh', badpixelmask=None
         img = Image.fromarray(numpy.uint8(output_array *255))
 
     img.transpose(Image.FLIP_TOP_BOTTOM).save(plot_fn)
-    print("plot saves as %s" % (plot_fn))
+    print("plot saved as %s" % (plot_fn))
 
 if __name__ == "__main__":
 
@@ -69,4 +69,7 @@ if __name__ == "__main__":
         badpixelmask = fn[:-12]+".segm.fits"
 
         if (not os.path.isfile(out_fn)):
-            plot_galfit_result(fn, out_fn, badpixelmask=badpixelmask)
+            try:
+                plot_galfit_result(fn, out_fn, badpixelmask=badpixelmask)
+            except:
+                print("Error while making plots for %s" % (fn))
