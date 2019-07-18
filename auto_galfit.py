@@ -109,14 +109,14 @@ def parallel_config_writer(queue, galfit_queue,
             shutil.copyfile(psf_file, psf_out_fn)
             _, galfit_psf_option = os.path.split(psf_out_fn)
 
-            if (psf_supersample <= 0):
-                # this is meant to be auto-scaled
-                try:
-                    psf_hdu = open(psf_out_fn)
-                    psf_supersample = psf_hdu[0].header['SUPERSMP']
-                    psf_hdu.close()
-                except:
-                    psf_supersample = 1.
+            # if (psf_supersample <= 0):
+            #     # this is meant to be auto-scaled
+            #     try:
+            #         psf_hdu = open(psf_out_fn)
+            #         psf_supersample = psf_hdu[0].header['SUPERSMP']
+            #         psf_hdu.close()
+            #     except:
+            #         psf_supersample = 1.
         else:
             galfit_psf_option = 'none'
 
@@ -664,10 +664,10 @@ if __name__ == "__main__":
             # Read PSF supersampling from PSF-file if available or default to 1
             #
             psf_supersample = 1.
-            if (args.psf_supersample == 0 and psf_file is not None):
+            if (args.psf_supersample <= 0 and psf_file is not None):
                 try:
                     psf_hdu = pyfits.open(psf_file)
-                    psf_supersample = 1./psf_hdu[0].header['PSF_SAMP']
+                    psf_supersample =  psf_hdu[0].header['SUPERSMP']  #1./psf_hdu[0].header['PSF_SAMP']
                     psf_hdu.close()
                 except Exception as e:
                     print(e)
