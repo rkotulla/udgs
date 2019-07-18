@@ -107,6 +107,11 @@ def run_sex_psfex(file_queue, sex_exe, sex_conf, sex_param,
             -CHECKPLOT_NAME %(bn)s.fwhm,%(bn)s.ellipticity,%(bn)s.counts,%(bn)s.countfrac,%(bn)s.chi2,%(bn)s.resi
             """ % dict(bn=output_basename)
 
+        psf_output_size = int(64 * supersample)
+        if ((psf_output_size % 2) == 0):
+            # size is even, we want an odd number
+            psf_output_size += 1
+
         psfex_command = """
         %(psfex_exe)s 
         -c %(psfex_conf)s 
@@ -127,7 +132,7 @@ def run_sex_psfex(file_queue, sex_exe, sex_conf, sex_param,
             ldac_catalog=ldac_file,
             bn=output_basename,
             pixelscale=1./ supersample,
-            psfsize=int(64 * supersample),
+            psfsize=psf_output_size,
         )
         print(psfex_command)
         print(" ".join(psfex_command.split()))
