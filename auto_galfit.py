@@ -150,7 +150,7 @@ def parallel_config_writer(queue, galfit_queue,
             'galfit_output': _out, #galfit_output,
             'bpm': _bpm, #segm_out_fn if segmentation_fn is not None else 'none',
             'psf': galfit_psf_option,
-            'psf_supersample': psf_supersample,
+            'psf_supersample': int(psf_supersample),
             'magzero': magzero,
             'constraints': constraints_opt,
         }
@@ -160,7 +160,7 @@ def parallel_config_writer(queue, galfit_queue,
             B) %(galfit_output)s   # Output data image block
             C) %(weight_image)s                # Sigma image name (made from data if blank or "none") 
             D) %(psf)s   #        # Input PSF image and (optional) diffusion kernel
-            E) %(psf_supersample).1f                   # PSF fine sampling factor relative to data 
+            E) %(psf_supersample)d                   # PSF fine sampling factor relative to data 
             F) %(bpm)s                # Bad pixel mask (FITS image or ASCII coord list)
             G) %(constraints)s                # File with parameter constraints (ASCII file) 
             H) %(x1)d %(x2)d %(y1)d %(y2)d   # Image region to fit (xmin xmax ymin ymax)
@@ -669,7 +669,8 @@ if __name__ == "__main__":
                     psf_hdu = pyfits.open(psf_file)
                     psf_supersample = 1./psf_hdu[0].header['PSF_SAMP']
                     psf_hdu.close()
-                except:
+                except Exception as e:
+                    print(e)
                     pass
 
             feedme_fullfn = os.path.join(galfit_dir, feedme_fn)
