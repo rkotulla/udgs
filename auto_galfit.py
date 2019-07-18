@@ -618,61 +618,61 @@ if __name__ == "__main__":
             continue
 
 
+        if (args.galfit_directory.find(":") >= 0):
+            _parts = args.galfit_directory.split(":")
+            _search = _parts[0]
+            _replace = _parts[1]
+            galfit_dir = fn.replace(_search, _replace)
+        else:
+            galfit_dir = os.path.join(basedir, args.galfit_directory)
+
+        if (not os.path.isdir(galfit_dir)):
+            print("Creating directory: %s" % (galfit_dir))
+            os.makedirs(galfit_dir)
+
+
+        # also work out the appropriate weight filename
+        if (args.weight_file.find(":") >= 0):
+            _parts = args.weight_file.split(":")
+            _search = _parts[0]
+            _replace = _parts[1]
+            weight_file = fn.replace(_search, _replace)
+        else:
+            weight_file = args.weight_file
+
+        #
+        # also construct the appropriate filename for the PSF
+        #
+        if (args.psf is not None):
+            if (args.psf.find(":") >= 0):
+                # we need to do some replacing here
+                _parts = args.psf.split(":")
+                _search = _parts[0]
+                _replace = _parts[1]
+                psf_file = fn.replace(_search, _replace)
+            else:
+                psf_file = args.psf
+        else:
+            psf_file = None
+
+        #
+        # Read PSF supersampling from PSF-file if available or default to 1
+        #
+        psf_supersample = 1.
+        if (args.psf_supersample <= 0 and psf_file is not None):
+            try:
+                psf_hdu = pyfits.open(psf_file)
+                psf_supersample =  psf_hdu[0].header['SUPERSMP']  #1./psf_hdu[0].header['PSF_SAMP']
+                psf_hdu.close()
+                print("Setting PSF supersampling to %d based on data from %s" % (psf_supersample, psf_file))
+            except Exception as e:
+                print(e)
+                pass
 
         for src in catalog:
             src_id = int(src['NUMBER'])
             feedme_fn = "%s.%05d.galfeed" % (basename, src_id)
 
-            if (args.galfit_directory.find(":") >= 0):
-                _parts = args.galfit_directory.split(":")
-                _search = _parts[0]
-                _replace = _parts[1]
-                galfit_dir = fn.replace(_search, _replace)
-            else:
-                galfit_dir = os.path.join(basedir, args.galfit_directory)
-
-            if (not os.path.isdir(galfit_dir)):
-                print("Creating directory: %s" % (galfit_dir))
-                os.makedirs(galfit_dir)
-
-
-            # also work out the appropriate weight filename
-            if (args.weight_file.find(":") >= 0):
-                _parts = args.weight_file.split(":")
-                _search = _parts[0]
-                _replace = _parts[1]
-                weight_file = fn.replace(_search, _replace)
-            else:
-                weight_file = args.weight_file
-
-            #
-            # also construct the appropriate filename for the PSF
-            #
-            if (args.psf is not None):
-                if (args.psf.find(":") >= 0):
-                    # we need to do some replacing here
-                    _parts = args.psf.split(":")
-                    _search = _parts[0]
-                    _replace = _parts[1]
-                    psf_file = fn.replace(_search, _replace)
-                else:
-                    psf_file = args.psf
-            else:
-                psf_file = None
-
-            #
-            # Read PSF supersampling from PSF-file if available or default to 1
-            #
-            psf_supersample = 1.
-            if (args.psf_supersample <= 0 and psf_file is not None):
-                try:
-                    psf_hdu = pyfits.open(psf_file)
-                    psf_supersample =  psf_hdu[0].header['SUPERSMP']  #1./psf_hdu[0].header['PSF_SAMP']
-                    psf_hdu.close()
-                    print("Setting PSF supersampling to %d based on data from %s" % (psf_supersample, psf_file))
-                except Exception as e:
-                    print(e)
-                    pass
 
             feedme_fullfn = os.path.join(galfit_dir, feedme_fn)
             # print(feedme_fullfn)
