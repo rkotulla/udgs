@@ -669,6 +669,7 @@ if __name__ == "__main__":
                     psf_hdu = pyfits.open(psf_file)
                     psf_supersample =  psf_hdu[0].header['SUPERSMP']  #1./psf_hdu[0].header['PSF_SAMP']
                     psf_hdu.close()
+                    print("Setting PSF supersampling to %d based on data from %s" % (psf_supersample, psf_file))
                 except Exception as e:
                     print(e)
                     pass
