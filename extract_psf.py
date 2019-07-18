@@ -13,7 +13,7 @@ import distutils.spawn
 import shutil
 
 def run_sex_psfex(file_queue, sex_exe, sex_conf, sex_param,
-                  psfex_exe, psfex_conf, generate_checks=True):
+                  psfex_exe, psfex_conf, generate_checks=True, supersample=2):
 
     while (True):
 
@@ -45,7 +45,7 @@ def run_sex_psfex(file_queue, sex_exe, sex_conf, sex_param,
         if (weight_fn is None):
             weight_opts = "-WEIGHT_TYPE NONE"
         else:
-            weight_opts = """-WEIGHT_IMAGE "%s" """ % (weight_fn)
+            weight_opts = """-WEIGHT_TYPE MAP_VAR -WEIGHT_IMAGE "%s" """ % (weight_fn)
 
 
         if (os.path.isfile(ldac_file)):
@@ -116,6 +116,9 @@ def run_sex_psfex(file_queue, sex_exe, sex_conf, sex_param,
         -PSF_SUFFIX .psf
         -WRITE_XML Y
         -XML_NAME %(bn)s.psfexlog.xml
+        -PSF_SAMPLING %(pixelscale).3f
+        -PSF_PIXELSCALE %(pixelscale).3f
+        -PSF_SIZE %(psfsize)d,%(psfsize)d 
         %(ldac_catalog)s
         """ % dict(
             psfex_exe=psfex_exe,
@@ -123,6 +126,8 @@ def run_sex_psfex(file_queue, sex_exe, sex_conf, sex_param,
             checks=check_opts,
             ldac_catalog=ldac_file,
             bn=output_basename,
+            pixelscale=1./ supersample,
+            psfsize=int(64 * supersample),
         )
         print(psfex_command)
         print(" ".join(psfex_command.split()))
@@ -152,6 +157,7 @@ def run_sex_psfex(file_queue, sex_exe, sex_conf, sex_param,
         psf_img = psf_hdu[0].data[:psf_size, :psf_size]
         psf_sum = numpy.sum(psf_img)
         psf_hdu[0].data = psf_img / psf_sum
+        psf_hdu[0].header['SUPERSMP'] = supersample
         psf_hdu.writeto(psf_output, overwrite=True)
 
         # done with this image
@@ -187,7 +193,8 @@ if __name__ == "__main__":
                          help="psf basename")
     cmdline.add_argument("--psfchecks", dest='psf_checks', default=True,
                          help="generate PSF check images", action='store_true')
-
+    cmdline.add_argument("--supersample", dest='supersample', type=float, default=2.,
+                         help="supersample PSF model")
     cmdline.add_argument("input_images", nargs="+",
                          help="list of input images")
     # cmdline.print_help()
@@ -228,6 +235,7 @@ if __name__ == "__main__":
                 sex_conf=args.sex_conf, sex_param=args.sex_params,
                 psfex_conf=args.psfex_conf, psfex_exe=args.psfex_exe,
                 generate_checks=args.psf_checks,
+                supersample=args.supersample,
             )
         )
         p.daemon = True
