@@ -40,7 +40,7 @@ def plot_galfit_result(fits_fn, plot_fn, scaling_mode='asinh', badpixelmask=None
     # print(badpixelmask)
     if (badpixelmask is not None and os.path.isfile(badpixelmask)):
 
-        print("Found bad pixel mask")
+        # print("Found bad pixel mask")
         bpm_hdu = pyfits.open(badpixelmask)
         bpm = (bpm_hdu[0].data > 0)
 
