@@ -3,7 +3,7 @@
 import os
 import sys
 import numpy
-import pyfits
+import astropy.io.fits as pyfits
 
 import argparse
 import multiprocessing
@@ -258,7 +258,8 @@ dryrun = False
 def parallel_run_galfit(galfit_queue, galfit_exe='galfit',
                         make_plots=True, redo=False,
                         n_galfit_complete=None, n_total_galfit_time=None,
-                        n_galfit_queuesize=None, n_galfeeds=None):
+                        n_galfit_queuesize=None, n_galfeeds=None,
+                        galfit_timeout=60):
 
     logger = logging.getLogger("GalfitWorker")
 
@@ -317,7 +318,7 @@ def parallel_run_galfit(galfit_queue, galfit_exe='galfit',
                                   stderr=subprocess.PIPE,
                                   cwd=_cwd) as galfit_process:
                 try:
-                    _stdout, _stderr = galfit_process.communicate(input=None, timeout=60)
+                    _stdout, _stderr = galfit_process.communicate(input=None, timeout=galfit_timeout)
 
 
                     returncode = galfit_process.returncode
@@ -557,6 +558,9 @@ if __name__ == "__main__":
     cmdline.add_argument("--psfres", dest="psf_supersample", default=1, type=float,
                          help="super-sample factor of PSF model")
 
+    cmdline.add_argument("--timeout", dest="galfit_timeout", default=60, type=float,
+                         help="maximum tme allowed for a galfit run")
+
     cmdline.add_argument("input_images", nargs="+",
                          help="list of input images")
     #cmdline.print_help()
@@ -750,6 +754,7 @@ if __name__ == "__main__":
                         n_total_galfit_time=n_total_galfit_time,
                         n_galfit_queuesize=n_galfit_queuesize,
                         n_galfeeds=n_galfeeds,
+                        galfit_timeout=args.galfit_timeout,
                         )
         )
         p.daemon = True
