@@ -50,7 +50,7 @@ def fitsldac2vot(ldac_fn, vot_fn=None, array_suffix=None):
                     new_colname = "%s_%s" % (col, suffix)
                 except:
                     new_colname = "%s_%d" % (col, idx+1)
-                print(new_colname)
+                # print(new_colname)
 
                 cat[new_colname] = cat[col][:,idx]
             del(cat[col])
