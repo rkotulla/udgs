@@ -77,7 +77,7 @@ def parallel_config_writer(queue, galfit_queue,
         phdu = pyfits.PrimaryHDU(data=img)
         phdu.header['SRC_X1'] = x1
         phdu.header['SRC_Y1'] = y1
-        phdu.writeto(img_out_fn, clobber=True)
+        phdu.writeto(img_out_fn, overwrite=True)
         img_hdu.close()
 
         _, _img = os.path.split(img_out_fn)
@@ -87,7 +87,7 @@ def parallel_config_writer(queue, galfit_queue,
         if (weight_fn is not None):
             wht_hdu = pyfits.open(weight_fn)
             wht = wht_hdu[0].data[y1:y2, x1:x2]
-            pyfits.PrimaryHDU(data=wht, header=phdu.header).writeto(weight_out_fn, clobber=True)
+            pyfits.PrimaryHDU(data=wht, header=phdu.header).writeto(weight_out_fn, overwrite=True)
             wht_hdu.close()
             _, _weight = os.path.split(weight_out_fn)
 
@@ -96,7 +96,7 @@ def parallel_config_writer(queue, galfit_queue,
                 segm_hdu = pyfits.open(segmentation_fn)
                 segm = segm_hdu[0].data[y1:y2, x1:x2].astype(numpy.int)
                 segm[segm == src_id] = 0
-                pyfits.PrimaryHDU(data=segm, header=phdu.header).writeto(segm_out_fn, clobber=True)
+                pyfits.PrimaryHDU(data=segm, header=phdu.header).writeto(segm_out_fn, overwrite=True)
                 segm_hdu.close()
                 _, _bpm = os.path.split(segm_out_fn)
             except IOError:
