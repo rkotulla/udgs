@@ -782,7 +782,7 @@ if __name__ == "__main__":
             n_galfit_complete.value,
             n_galfeeds.value,
             n_galfit_queuesize.value,
-            n_galfit_queuesize.value * avg_galfit_time,
+            n_galfit_queuesize.value * avg_galfit_time / args.number_processes,
         ))
         sys.stdout.flush()
         time.sleep(1)
