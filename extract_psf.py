@@ -122,7 +122,7 @@ def run_sex_psfex(file_queue, sex_exe, sex_conf, sex_param,
         -WRITE_XML Y
         -XML_NAME %(bn)s.psfexlog.xml
         -PSF_SAMPLING %(pixelscale).3f
-        -PSF_PIXELSCALE %(pixelscale).3f
+        -PSF_PIXELSIZE %(pixelscale).3f
         -PSF_SIZE %(psfsize)d,%(psfsize)d 
         %(ldac_catalog)s
         """ % dict(
