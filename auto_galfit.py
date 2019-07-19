@@ -130,8 +130,8 @@ def parallel_config_writer(queue, galfit_queue,
         # dy = numpy.max([3., 3 * numpy.sqrt(src_info['ERRY2WIN_IMAGE']) + 1.])
         with open(constraints_fn, "w") as cf:
             constraints = """
-                1   x   %(dx).2f %(dx).2f
-                1   y   %(dy).2f %(dy).2f    
+                1   x   -%(dx).2f %(dx).2f
+                1   y   -%(dy).2f %(dy).2f    
                         
             """ % {
                 'dx': dx,
