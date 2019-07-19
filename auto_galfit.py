@@ -782,7 +782,6 @@ if __name__ == "__main__":
     #     print n_galfit_queuesize.lock
     #     time.sleep(10)
 
-    gf_problems = open("galfit_problems.log", "a", buffering=0)
 
     while (n_galfit_queuesize.value > 0):
         try:
@@ -800,18 +799,19 @@ if __name__ == "__main__":
         #
         # try to grab whatever files were labeled as bad and add them to the problem list
         #
+        new_problems = []
         while (True):
             try:
                 problem_file = galfit_problems_queue.get(block=False, timeout=0.1)
             except queue.Empty:
                 break
-            gf_problems.write(problem_file+"\n")
-
-
+            # gf_problems.write(problem_file+"\n")
+            new_problems.append(problem_file)
+        if (new_problems):
+            gf_problems = open("galfit_problems.log", "a+")
+            gf_problems.writelines(new_problems)
+            gf_problems.close()
         time.sleep(1)
-
-    # close the problems file
-    gf_problems.close()
 
 
 
