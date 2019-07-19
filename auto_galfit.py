@@ -9,6 +9,7 @@ import argparse
 import multiprocessing
 import time
 import subprocess
+import queue
 
 import logging
 import shutil
@@ -257,11 +258,14 @@ def parallel_config_writer(queue, galfit_queue,
 dryrun = False
 
 
-def parallel_run_galfit(galfit_queue, galfit_exe='galfit',
+def parallel_run_galfit(galfit_queue,
+                        problems_queue,
+                        galfit_exe='galfit',
                         make_plots=True, redo=False,
                         n_galfit_complete=None, n_total_galfit_time=None,
                         n_galfit_queuesize=None, n_galfeeds=None,
-                        galfit_timeout=60):
+                        galfit_timeout=60,
+                        ):
 
     logger = logging.getLogger("GalfitWorker")
 
@@ -339,6 +343,9 @@ def parallel_run_galfit(galfit_queue, galfit_exe='galfit',
                     galfit_process.kill()
                     print("Terminating galfit after timeout")
                     returncode = -9999999
+
+                    problem_str = "%s ::: %s" % (feedme_fn, " ".join(galfit_cmd.split()))
+                    problems_queue.put(problem_str)
 
             # ret = subprocess.Popen(galfit_cmd.split(),
             #                        stdout=subprocess.PIPE,
@@ -747,10 +754,12 @@ if __name__ == "__main__":
 
 
     galfit_workers = []
+    galfit_problems_queue = multiprocessing.Queue()
     for i in range(args.number_processes):
         p = multiprocessing.Process(
             target=parallel_run_galfit,
             kwargs=dict(galfit_queue=galfit_queue,
+                        problems_queue=galfit_problems_queue,
                         galfit_exe=args.galfit_exe,
                         make_plots=args.plot_results,
                         redo=False,
@@ -773,6 +782,8 @@ if __name__ == "__main__":
     #     print n_galfit_queuesize.lock
     #     time.sleep(10)
 
+    gf_problems = open("galfit_problems.log", "a", buffering=0)
+
     while (n_galfit_queuesize.value > 0):
         try:
             avg_galfit_time = n_total_galfit_time.value / n_galfit_complete.value
@@ -785,7 +796,24 @@ if __name__ == "__main__":
             n_galfit_queuesize.value * avg_galfit_time / args.number_processes,
         ))
         sys.stdout.flush()
+
+        #
+        # try to grab whatever files were labeled as bad and add them to the problem list
+        #
+        while (True):
+            try:
+                problem_file = galfit_problems_queue.get(block=False, timeout=0.1)
+            except queue.Empty:
+                break
+            gf_problems.write(problem_file+"\n")
+
+
         time.sleep(1)
+
+    # close the problems file
+    gf_problems.close()
+
+
 
     # galfit_queue.join()
     print("done with all work!")
