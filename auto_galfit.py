@@ -10,6 +10,7 @@ import multiprocessing
 import time
 import subprocess
 import queue
+import time
 
 import logging
 import shutil
@@ -782,13 +783,14 @@ if __name__ == "__main__":
     #     print n_galfit_queuesize.lock
     #     time.sleep(10)
 
-
+    start_time = time.time()
     while (n_galfit_queuesize.value > 0):
         try:
             avg_galfit_time = n_total_galfit_time.value / n_galfit_complete.value
         except ZeroDivisionError:
             avg_galfit_time = 10.
-        sys.stdout.write("\rFinished %d (of %d) galfit runs, %d (est. %.1f seconds) left" % (
+        sys.stdout.write("\rRunning since %d seconds, finished %d (of %d) galfit runs, %d (est. %.1f seconds) left" % (
+            int(numpy.round(time.time() - start_time)),
             n_galfit_complete.value,
             n_galfeeds.value,
             n_galfit_queuesize.value,
