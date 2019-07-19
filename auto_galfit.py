@@ -345,7 +345,7 @@ def parallel_run_galfit(galfit_queue,
                     print("Terminating galfit after timeout")
                     returncode = -9999999
 
-                    problem_str = "%s ::: %s" % (feedme_fn, " ".join(galfit_cmd.split()))
+                    problem_str = "%s ::: %s\n" % (feedme_fn, " ".join(galfit_cmd.split()))
                     problems_queue.put(problem_str)
 
             # ret = subprocess.Popen(galfit_cmd.split(),
