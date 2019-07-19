@@ -12,6 +12,8 @@ if __name__ == "__main__":
 
     if (var_fn.endswith("_var.fits")):
         sigma_fn = var_fn[:-9]+"_sigma.fits"
+    else:
+        sigma_fn = sys.argv[2]
 
     hdulist = pyfits.open(var_fn)
     variance =  hdulist[0].data
