@@ -22,7 +22,11 @@ import astropy.table
 import shutil
 
 def parallel_config_writer(queue, galfit_queue,
-                           n_galfeeds, n_galfit_queuesize):
+                           n_galfeeds, n_galfit_queuesize,
+                           workername=None):
+
+    if (workername is not None):
+        print("Worker %s reporting for work" % (workername))
 
     counter = 0
     while (True):
@@ -93,9 +97,9 @@ def parallel_config_writer(queue, galfit_queue,
             wht_hdu.close()
             _, _weight = os.path.split(weight_out_fn)
 
-        if (segmentation_fn is not None):
+        if (segmentation_input_fn is not None):
             try:
-                segm_hdu = pyfits.open(segmentation_fn)
+                segm_hdu = pyfits.open(segmentation_input_fn)
                 segm = segm_hdu[0].data[y1:y2, x1:x2].astype(numpy.int)
                 segm[segm == src_id] = 0
                 pyfits.PrimaryHDU(data=segm, header=phdu.header).writeto(segm_out_fn, overwrite=True)
@@ -104,7 +108,7 @@ def parallel_config_writer(queue, galfit_queue,
             except IOError:
                 pass
         else:
-            print("Unable to generate source mask from segmentation file (%s)" % (segmentation_fn))
+            print("Unable to generate source mask from segmentation file (%s)" % (segmentation_input_fn))
 
         if (psf_file is not None and os.path.isfile(psf_file)):
             # copy the PSF model
@@ -592,6 +596,25 @@ if __name__ == "__main__":
     n_galfit_complete.value = 0
     n_total_galfit_time.value = 0.
 
+    #
+    # First start all workers so they can start working right away
+    #
+    feedme_workers = []
+    print("Starting up %d parallel Galfit workers" % (args.number_processes))
+    for i in range(args.number_processes):
+        p = multiprocessing.Process(
+            target=parallel_config_writer,
+            kwargs=dict(queue=src_queue,
+                        galfit_queue=galfit_queue,
+                        n_galfeeds=n_galfeeds,
+                        n_galfit_queuesize=n_galfit_queuesize,
+                        workername="FeedmeWriter_%03d" % (i+1),
+                        ),
+        )
+        p.daemon = True
+        p.start()
+        feedme_workers.append(p)
+    print("Feed-me creation workers started")
 
     total_feed_count = 0
     for fn in args.input_images:
@@ -623,8 +646,8 @@ if __name__ == "__main__":
         try:
             catalog = astropy.table.Table.read(catalog_fn)
             print("done loading catalog")
-        except:
-            print("Unable to open catalog %s" % (catalog_fn))
+        except (IOError, ValueError) as e:
+            print("Unable to open catalog %s (%s)" % (catalog_fn, e.message))
             continue
 
 
@@ -679,6 +702,9 @@ if __name__ == "__main__":
                 print(e)
                 pass
 
+        #
+        # Now we'll feed the workers' queue
+        #
         for src in catalog:
             src_id = int(src['NUMBER'])
             feedme_fn = "%s.%05d.galfeed" % (basename, src_id)
@@ -718,27 +744,10 @@ if __name__ == "__main__":
 
             total_feed_count += 1
 
-    print("Configuring %d galfit runs using %d CPU-cores" % (total_feed_count, args.number_processes))
-    # sys.exit(0)
-
-    #
-    # Now that we have filled up the work-queue, get to work
-    #
-    feedme_workers = []
-    for i in range(args.number_processes):
-        p = multiprocessing.Process(
-            target=parallel_config_writer,
-            kwargs=dict(queue=src_queue,
-                        galfit_queue=galfit_queue,
-                        n_galfeeds=n_galfeeds,
-                        n_galfit_queuesize=n_galfit_queuesize,
-                        ),
-        )
-        p.daemon = True
-        p.start()
-        feedme_workers.append(p)
+    # Also add the worker termination token to the job queue
+    for p in feedme_workers:
         src_queue.put((None))
-    print("Feed-me creation workers started")
+
     src_queue.join()
     print("Done creating all GALFIT config files, joining the fun!")
     # print(n_galfeeds, n_galfit_queuesize)
