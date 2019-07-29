@@ -11,6 +11,8 @@ import astropy.io.fits as pyfits
 import numpy
 import ldac2vot
 
+import conf
+
 def run_sex(file_queue, sex_exe, sex_conf, sex_param, fix_vot_array=None):
 
     while (True):
@@ -92,7 +94,8 @@ def run_sex(file_queue, sex_exe, sex_conf, sex_param, fix_vot_array=None):
 
         # Now convert the FITS-LDAC catalog to VOTable format
         ldac2vot.fitsldac2vot(ldac_file, vot_fn=cat_file,
-                              array_suffix=fix_vot_array)
+                              array_suffix=fix_vot_array,
+                              format=conf.cat_format)
 
         file_queue.task_done()
 
@@ -100,11 +103,15 @@ def run_sex(file_queue, sex_exe, sex_conf, sex_param, fix_vot_array=None):
 
 if __name__ == "__main__":
 
+    fn = os.path.abspath(__file__)
+    dirname,_ = os.path.split(fn)
+    config_dir = os.path.join(dirname, "config")
+
     # setup command line parameters
     cmdline = argparse.ArgumentParser()
-    cmdline.add_argument("--conf", dest="sex_conf", default="sex.conf",
+    cmdline.add_argument("--conf", dest="sex_conf", default=os.path.join(config_dir, "sex.conf"),
                          help="source extractor config filename")
-    cmdline.add_argument("--params", dest="sex_params", default="default.param",
+    cmdline.add_argument("--params", dest="sex_params", default=os.path.join(config_dir, "sex.param"),
                          help="number of models to insert into each image")
     cmdline.add_argument("--nprocs", dest="number_processes",
                          default=multiprocessing.cpu_count(), type=int,
