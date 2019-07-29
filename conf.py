@@ -1,0 +1,1 @@
+cat_format='fits'

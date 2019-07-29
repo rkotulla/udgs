@@ -29,7 +29,7 @@ def read_definitions(definitions):
 
 
 
-def fitsldac2vot(ldac_fn, vot_fn=None, array_suffix=None):
+def fitsldac2vot(ldac_fn, vot_fn=None, array_suffix=None, format='votable'):
 
     hdu = pyfits.open(ldac_fn)
     ldac_data = hdu[2].data
@@ -57,7 +57,7 @@ def fitsldac2vot(ldac_fn, vot_fn=None, array_suffix=None):
 
     # print(cat.colnames)
     if (vot_fn is not None):
-        cat.write(vot_fn, format='votable', overwrite=True)
+        cat.write(vot_fn, format=format, overwrite=True)
 
     return cat
 
