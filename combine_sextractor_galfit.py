@@ -5,7 +5,7 @@ import sys
 import numpy
 import argparse
 import multiprocessing
-import pyfits
+import astropy.io.fits as pyfits
 import logging
 import logsetup
 logsetup.setup_log()
