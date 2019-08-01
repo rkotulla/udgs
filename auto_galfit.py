@@ -43,9 +43,14 @@ def parallel_config_writer(queue, galfit_queue,
             max_size, psf_file, psf_supersample, \
             magzero = cmd
 
+        print("output", feedme_fn)
+        queue.task_done()
+        continue
+
+        # print(image_fn)
         if (os.path.isfile(feedme_fn)):
             print("Skipping existing feed-file %s" % (feedme_fn))
-            queue.task_done()
+
             if (n_galfit_queuesize is not None):
                 with n_galfit_queuesize.get_lock():
                     n_galfit_queuesize.value += 1
@@ -53,12 +58,15 @@ def parallel_config_writer(queue, galfit_queue,
                 with n_galfeeds.get_lock():
                     n_galfeeds.value += 1
             galfit_queue.put((feedme_fn, galfit_output, galfit_logfile))
+
+            queue.task_done()
             continue
 
         #
         # Create the galfit feedme file, the cutouts for the
         # image, weight-image, and segmentation mask
         #
+        print("Creating feed-me file %s" % (feedme_fn))
         fwhm = src_info['FWHM_IMAGE']
         src_id = int(src_info['NUMBER'])
         size = 3 * fwhm
@@ -256,8 +264,8 @@ def parallel_config_writer(queue, galfit_queue,
         queue.task_done()
         continue
 
-    # print("Prepared %d galfeeds, queue-size = %d %d" % (
-    #     n_galfeeds.value, n_galfit_queuesize.value, counter))
+    print("Prepared %d galfeeds, queue-size = %d %d" % (
+        n_galfeeds.value, n_galfit_queuesize.value, counter))
 
 
 dryrun = False
@@ -522,6 +530,166 @@ def parallel_run_galfit(galfit_queue,
 #
 
 
+def parallel_prep_stage(file_queue, args, total_feed_count, workername=None):
+
+
+    if (workername is not None):
+        print("Worker %s started" % (workername))
+
+    while (True):
+
+        fn = file_queue.get()
+        if (fn is None):
+            print(workername, "received termination token")
+            file_queue.task_done()
+            break
+
+        # open input image
+        hdulist = pyfits.open(fn)
+
+        try:
+            magzero = 2.5 * numpy.log10(hdulist[0].header['FLUXMAG0'])
+        except:
+            magzero = 0
+
+        # construct all filenames we need
+        bn,_ = os.path.splitext(fn)
+        #basename = os.path.split(bn)
+        basedir,basename = os.path.split(bn)
+        catalog_fn = "%s.%s" % (bn, args.catalog_extension)
+
+        segmentation_fn = "%s.segments" % (bn)
+        if (not os.path.isfile(segmentation_fn)):
+            print("Unable to use segmentation masks from %s" % (segmentation_fn))
+            segmentation_fn = None
+
+        # load catalog
+        if (not os.path.isfile(catalog_fn)):
+            print("Unable to open catalog %s" % (catalog_fn))
+            file_queue.task_done()
+            continue
+
+        # catalog = numpy.loadtxt(catalog_fn)
+        try:
+            catalog = astropy.table.Table.read(catalog_fn)
+            print("done loading catalog (%s)" % (catalog_fn))
+        except (IOError, ValueError) as e:
+            print("Unable to open catalog %s (%s)" % (catalog_fn, e.message))
+            file_queue.task_done()
+            continue
+
+
+        if (args.galfit_directory.find(":") >= 0):
+            _parts = args.galfit_directory.split(":")
+            _search = _parts[0]
+            _replace = _parts[1]
+            galfit_dir = fn.replace(_search, _replace)
+        else:
+            galfit_dir = os.path.join(basedir, args.galfit_directory)
+
+        if (not os.path.isdir(galfit_dir)):
+            print("Creating directory: %s" % (galfit_dir))
+            os.makedirs(galfit_dir)
+
+
+        # also work out the appropriate weight filename
+        if (args.weight_file.find(":") >= 0):
+            _parts = args.weight_file.split(":")
+            _search = _parts[0]
+            _replace = _parts[1]
+            weight_file = fn.replace(_search, _replace)
+        else:
+            weight_file = args.weight_file
+
+        #
+        # also construct the appropriate filename for the PSF
+        #
+        if (args.psf is not None):
+            if (args.psf.find(":") >= 0):
+                # we need to do some replacing here
+                _parts = args.psf.split(":")
+                _search = _parts[0]
+                _replace = _parts[1]
+                psf_file = fn.replace(_search, _replace)
+            else:
+                psf_file = args.psf
+        else:
+            psf_file = None
+
+        #
+        # Read PSF supersampling from PSF-file if available or default to 1
+        #
+        psf_supersample = 1.
+        if (args.psf_supersample <= 0 and psf_file is not None):
+            try:
+                psf_hdu = pyfits.open(psf_file)
+                psf_supersample =  psf_hdu[0].header['SUPERSMP']  #1./psf_hdu[0].header['PSF_SAMP']
+                psf_hdu.close()
+                print("Setting PSF supersampling to %d based on data from %s" % (psf_supersample, psf_file))
+            except Exception as e:
+                print(e)
+                pass
+
+        #
+        # Now we'll feed the workers' queue
+        #
+        this_catalog_added = 0
+        for src in catalog[:10]:
+            src_id = int(src['NUMBER'])
+            feedme_fn = "%s.%05d.galfeed" % (basename, src_id)
+            print("inputfeed", feedme_fn)
+
+            feedme_fullfn = os.path.join(galfit_dir, feedme_fn)
+            # print(feedme_fullfn)
+
+            # _segmentation_cutout_fn = "%s.%05d.segment" % (basename, src_id)
+            # segmentation_cutout_fn = os.path.join(galfit_dir, _segmentation_cutout_fn)
+            #
+            # _segmenation_input_fn =
+
+            galfit_fn = "%s.%05d.galfit.fits" % (basename, src_id)
+            galfit_fullfn = os.path.join(galfit_dir, galfit_fn)
+
+
+            galfit_logfn = "%s.%05d.galfit.log" % (basename, src_id)
+            galfit_fulllogfn = os.path.join(galfit_dir, galfit_logfn)
+
+            src_queue.put((
+                fn,                 # image_fn,
+                feedme_fullfn,      # feedme_fn,
+                weight_file,        # weight_fn,
+                src,                # src_info,
+                hdulist[0].header,  # img_header
+                galfit_fullfn,      # galfit output filename
+                galfit_fulllogfn,
+                segmentation_fn,
+                galfit_dir,
+                basename,
+                args.max_size,
+                psf_file, psf_supersample,
+                magzero,
+            ))
+            this_catalog_added += 1
+            # print(src)
+
+            # add to the number of jobs
+            with total_feed_count.get_lock():
+                total_feed_count.value += 1
+
+            time.sleep(0.002)
+
+        print("Done with handling catalog %s, added %d new sources for a total of %d" % (
+            fn, this_catalog_added, total_feed_count.value
+        ))
+
+        file_queue.task_done()
+
+        pass
+
+    print("Shutting down %s" % (workername if workername is not None else ""))
+    return
+
+
 if __name__ == "__main__":
 
     # setup command line parameters
@@ -596,159 +764,124 @@ if __name__ == "__main__":
     n_galfit_complete.value = 0
     n_total_galfit_time.value = 0.
 
+    ##########################################################################
+    #
+    # First, handle all the jobs to load catalogs and generate the
+    # list of feedme files that need to be written
+    #
+    # TODO: Merge the catalog reader and feedme-writer jobs into one; this
+    #   should also increase speed by not having to open input files repeatedly
+    #   from different processes
+    #
+    ##########################################################################
+
+
+    #
+    # Next, start up the workers to feed to configuration writer workers
+    #
+    total_feed_count = multiprocessing.Value('i', 0)
+    input_file_queue = multiprocessing.JoinableQueue()
+    catalog_handler_processes = []
+    for i in range(15):
+        workername = "CatalogPrepper_%d" % (i+1)
+        p = multiprocessing.Process(
+            target=parallel_prep_stage,
+            kwargs=dict(
+                file_queue=input_file_queue,
+                args=args,
+                total_feed_count=total_feed_count,
+                workername=workername,
+            )
+        )
+        p.daemon = True
+        p.start()
+        catalog_handler_processes.append((p,workername))
+
+    # next, feed the queue
+    for fn in args.input_images:
+        input_file_queue.put(fn)
+
+    # and also add the termination token
+    print("Adding shutdown signals to catalog handlers")
+    for p in catalog_handler_processes:
+        input_file_queue.put(None)
+
+    # now wait for all catalogs to be read and the work to be queued up
+    # for the actual workers
+    input_file_queue.join()
+    # while (True):
+    #     print("Waiting for all catalogs to be processed")
+    #     one_still_alive = False
+    #     for (p,wn) in catalog_handler_processes:
+    #         p.join(0.1)
+    #         one_still_alive |= p.is_alive()
+    #         print(wn,"still alive", p.is_alive())
+    #     if (not one_still_alive):
+    #         break
+    #     time.sleep(0.5)
+        #print(wn, p.is_alive())
+
+
+    ##########################################################################
+    #
+    # Next, we'll handle all the file writers
+    #
+    ##########################################################################
+
     #
     # First start all workers so they can start working right away
     #
     feedme_workers = []
     print("Starting up %d parallel Galfit workers" % (args.number_processes))
     for i in range(args.number_processes):
+        workername = "FeedmeWriter_%03d" % (i+1)
         p = multiprocessing.Process(
             target=parallel_config_writer,
             kwargs=dict(queue=src_queue,
                         galfit_queue=galfit_queue,
                         n_galfeeds=n_galfeeds,
                         n_galfit_queuesize=n_galfit_queuesize,
-                        workername="FeedmeWriter_%03d" % (i+1),
+                        workername=workername,
                         ),
         )
         p.daemon = True
         p.start()
-        feedme_workers.append(p)
+        feedme_workers.append((p,workername))
     print("Feed-me creation workers started")
 
-    total_feed_count = 0
-    for fn in args.input_images:
-
-        # open input image
-        hdulist = pyfits.open(fn)
-
-        try:
-            magzero = 2.5 * numpy.log10(hdulist[0].header['FLUXMAG0'])
-        except:
-            magzero = 0
-
-        # construct all filenames we need
-        bn,_ = os.path.splitext(fn)
-        #basename = os.path.split(bn)
-        basedir,basename = os.path.split(bn)
-        catalog_fn = "%s.%s" % (bn, args.catalog_extension)
-
-        segmentation_fn = "%s.segments" % (bn)
-        if (not os.path.isfile(segmentation_fn)):
-            segmentation_fn = None
-
-        # load catalog
-        if (not os.path.isfile(catalog_fn)):
-            print("Unable to open catalog %s" % (catalog_fn))
-            continue
-
-        # catalog = numpy.loadtxt(catalog_fn)
-        try:
-            catalog = astropy.table.Table.read(catalog_fn)
-            print("done loading catalog")
-        except (IOError, ValueError) as e:
-            print("Unable to open catalog %s (%s)" % (catalog_fn, e.message))
-            continue
 
 
-        if (args.galfit_directory.find(":") >= 0):
-            _parts = args.galfit_directory.split(":")
-            _search = _parts[0]
-            _replace = _parts[1]
-            galfit_dir = fn.replace(_search, _replace)
-        else:
-            galfit_dir = os.path.join(basedir, args.galfit_directory)
-
-        if (not os.path.isdir(galfit_dir)):
-            print("Creating directory: %s" % (galfit_dir))
-            os.makedirs(galfit_dir)
-
-
-        # also work out the appropriate weight filename
-        if (args.weight_file.find(":") >= 0):
-            _parts = args.weight_file.split(":")
-            _search = _parts[0]
-            _replace = _parts[1]
-            weight_file = fn.replace(_search, _replace)
-        else:
-            weight_file = args.weight_file
-
-        #
-        # also construct the appropriate filename for the PSF
-        #
-        if (args.psf is not None):
-            if (args.psf.find(":") >= 0):
-                # we need to do some replacing here
-                _parts = args.psf.split(":")
-                _search = _parts[0]
-                _replace = _parts[1]
-                psf_file = fn.replace(_search, _replace)
-            else:
-                psf_file = args.psf
-        else:
-            psf_file = None
-
-        #
-        # Read PSF supersampling from PSF-file if available or default to 1
-        #
-        psf_supersample = 1.
-        if (args.psf_supersample <= 0 and psf_file is not None):
-            try:
-                psf_hdu = pyfits.open(psf_file)
-                psf_supersample =  psf_hdu[0].header['SUPERSMP']  #1./psf_hdu[0].header['PSF_SAMP']
-                psf_hdu.close()
-                print("Setting PSF supersampling to %d based on data from %s" % (psf_supersample, psf_file))
-            except Exception as e:
-                print(e)
-                pass
-
-        #
-        # Now we'll feed the workers' queue
-        #
-        for src in catalog:
-            src_id = int(src['NUMBER'])
-            feedme_fn = "%s.%05d.galfeed" % (basename, src_id)
-
-
-            feedme_fullfn = os.path.join(galfit_dir, feedme_fn)
-            # print(feedme_fullfn)
-
-            # _segmentation_cutout_fn = "%s.%05d.segment" % (basename, src_id)
-            # segmentation_cutout_fn = os.path.join(galfit_dir, _segmentation_cutout_fn)
-            #
-            # _segmenation_input_fn =
-
-            galfit_fn = "%s.%05d.galfit.fits" % (basename, src_id)
-            galfit_fullfn = os.path.join(galfit_dir, galfit_fn)
-
-
-            galfit_logfn = "%s.%05d.galfit.log" % (basename, src_id)
-            galfit_fulllogfn = os.path.join(galfit_dir, galfit_logfn)
-
-            src_queue.put((
-                fn,                 # image_fn,
-                feedme_fullfn,      # feedme_fn,
-                weight_file,        # weight_fn,
-                src,                # src_info,
-                hdulist[0].header,  # img_header
-                galfit_fullfn,      # galfit output filename
-                galfit_fulllogfn,
-                segmentation_fn,
-                galfit_dir,
-                basename,
-                args.max_size,
-                psf_file, psf_supersample,
-                magzero,
-            ))
-            # print(src)
-
-            total_feed_count += 1
-
+    print("Adding token to file writer workers")
     # Also add the worker termination token to the job queue
+
+    time.sleep(5)
     for p in feedme_workers:
         src_queue.put((None))
 
+    print("waiting")
+    time.sleep(10)
+
+    print("Joining feedme-writer queue")
+    while (True):
+        print("Waiting for all Galfeed files to be written")
+        one_still_alive = False
+        for (p,wn) in feedme_workers:
+            p.join(0.1)
+            one_still_alive |= p.is_alive()
+            print(wn,"still alive", p.is_alive())
+        print("All dead?", all_dead)
+        if (not one_still_alive):
+            break
+        time.sleep(1)
+
+    sys.exit(-1)
+
+    # for i in feedme_workers:
+    #     p.join()
     src_queue.join()
+
+    # sys.exit(-1)
+
     print("Done creating all GALFIT config files, joining the fun!")
     # print(n_galfeeds, n_galfit_queuesize)
     # time.sleep(1)
@@ -762,7 +895,7 @@ if __name__ == "__main__":
     #     print(counter, n_galfeeds.value)
 
 
-
+    print("Starting up the GALFIT workers")
     galfit_workers = []
     galfit_problems_queue = multiprocessing.Queue()
     for i in range(args.number_processes):
@@ -784,8 +917,7 @@ if __name__ == "__main__":
         p.start()
         galfit_workers.append(p)
         # galfit_queue.put((None))
-
-    print("Galfit workers started")
+    print("All Galfit workers started")
 
     # wait for all config files to be written
     # for i in range(30):
