@@ -13,7 +13,7 @@ import distutils.spawn
 import shutil
 
 def run_sex_psfex(file_queue, sex_exe, sex_conf, sex_param,
-                  psfex_exe, psfex_conf, generate_checks=True, supersample=2):
+                  psfex_exe, psfex_conf, supersample=2):
 
     while (True):
 
@@ -98,9 +98,7 @@ def run_sex_psfex(file_queue, sex_exe, sex_conf, sex_param,
         #
 
         output_basename = img_basename[:-6]+"_psf" #"xxx_psf"
-        check_opts = ""
-        if (generate_checks):
-            check_opts = """
+        check_opts = """
             -CHECKIMAGE_TYPE CHI,PROTOTYPES,SAMPLES,RESIDUALS,SNAPSHOTS
             -CHECKIMAGE_NAME %(bn)s.chi.fits,%(bn)s.proto.fits,%(bn)s.samp.fits,%(bn)s.resi.fits,%(bn)s.snap.fits
             -CHECKPLOT_TYPE FWHM,ELLIPTICITY,COUNTS,COUNT_FRACTION,CHI2,RESIDUALS
@@ -196,8 +194,6 @@ if __name__ == "__main__":
                          help="weight map")
     cmdline.add_argument("--psf", dest='psf_image', type=str, default="_image.fits:_psf.fits",
                          help="psf basename")
-    cmdline.add_argument("--psfchecks", dest='psf_checks', default=True,
-                         help="generate PSF check images", action='store_true')
     cmdline.add_argument("--supersample", dest='supersample', type=float, default=2.,
                          help="supersample PSF model")
     cmdline.add_argument("input_images", nargs="+",
@@ -239,7 +235,6 @@ if __name__ == "__main__":
                 sex_exe=args.sex_exe,
                 sex_conf=args.sex_conf, sex_param=args.sex_params,
                 psfex_conf=args.psfex_conf, psfex_exe=args.psfex_exe,
-                generate_checks=args.psf_checks,
                 supersample=args.supersample,
             )
         )
