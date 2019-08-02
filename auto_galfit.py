@@ -21,248 +21,412 @@ import plot_galfit_results
 import astropy.table
 import shutil
 
-def parallel_config_writer(queue, galfit_queue,
-                           n_galfeeds, n_galfit_queuesize,
+
+def parallel_config_writer(file_queue, galfit_queue,
+                           n_galfeeds, n_galfit_queuesize, total_feed_count,
                            workername=None):
 
+    time.sleep(1)
     if (workername is not None):
         print("Worker %s reporting for work" % (workername))
 
     counter = 0
     while (True):
 
-        cmd = queue.get()
-        if (cmd is None):
-            queue.task_done()
+        fn = file_queue.get()
+        if (fn is None):
+            file_queue.task_done()
             # galfit_queue.put((None))
             break
 
-        image_fn, feedme_fn, weight_fn, src_info, \
-            img_header, galfit_output, galfit_logfile, \
-            segmentation_input_fn, galfit_dir, basename, \
-            max_size, psf_file, psf_supersample, \
-            magzero = cmd
+        # open input image
+        img_hdu = pyfits.open(fn)
+        img_header = img_hdu[0].header
 
-        print("output", feedme_fn)
-        queue.task_done()
-        continue
+        try:
+            magzero = 2.5 * numpy.log10(img_hdu[0].header['FLUXMAG0'])
+        except:
+            magzero = 0
 
-        # print(image_fn)
-        if (os.path.isfile(feedme_fn)):
-            print("Skipping existing feed-file %s" % (feedme_fn))
+        # construct all filenames we need
+        bn,_ = os.path.splitext(fn)
+        #basename = os.path.split(bn)
+        basedir,basename = os.path.split(bn)
+        catalog_fn = "%s.%s" % (bn, args.catalog_extension)
 
+        segmentation_fn = "%s.segments" % (bn)
+        if (not os.path.isfile(segmentation_fn)):
+            print("Unable to use segmentation masks from %s" % (segmentation_fn))
+            segmentation_fn = None
+
+        segm_hdu = None
+        if (segmentation_fn is not None):
+            segm_hdu = pyfits.open(segmentation_fn)
+
+        # load catalog
+        if (not os.path.isfile(catalog_fn)):
+            print("Unable to open catalog %s" % (catalog_fn))
+            file_queue.task_done()
+            continue
+
+        # catalog = numpy.loadtxt(catalog_fn)
+        try:
+            catalog = astropy.table.Table.read(catalog_fn)
+            print("done loading catalog (%s)" % (catalog_fn))
+        except (IOError, ValueError) as e:
+            print("Unable to open catalog %s (%s)" % (catalog_fn, e.message))
+            file_queue.task_done()
+            continue
+
+
+        if (args.galfit_directory.find(":") >= 0):
+            _parts = args.galfit_directory.split(":")
+            _search = _parts[0]
+            _replace = _parts[1]
+            galfit_dir = fn.replace(_search, _replace)
+        else:
+            galfit_dir = os.path.join(basedir, args.galfit_directory)
+
+        if (not os.path.isdir(galfit_dir)):
+            print("Creating directory: %s" % (galfit_dir))
+            os.makedirs(galfit_dir)
+        else:
+            print("Careful -- Resuing existing galfit directory")
+
+        # also work out the appropriate weight filename
+        if (args.weight_file.find(":") >= 0):
+            _parts = args.weight_file.split(":")
+            _search = _parts[0]
+            _replace = _parts[1]
+            weight_file = fn.replace(_search, _replace)
+        else:
+            weight_file = args.weight_file
+        # open the weight file
+        wht_hdu = None
+        if (weight_file is not None):
+            wht_hdu = pyfits.open(weight_file)
+
+
+
+        #
+        # also construct the appropriate filename for the PSF
+        #
+        if (args.psf is not None):
+            if (args.psf.find(":") >= 0):
+                # we need to do some replacing here
+                _parts = args.psf.split(":")
+                _search = _parts[0]
+                _replace = _parts[1]
+                psf_file = fn.replace(_search, _replace)
+            else:
+                psf_file = args.psf
+            if (not os.path.isfile(psf_file)):
+                psf_file = None
+        else:
+            psf_file = None
+
+        #
+        # Read PSF supersampling from PSF-file if available or default to 1
+        #
+        psf_supersample = 1.
+        if (args.psf_supersample <= 0 and psf_file is not None):
+            try:
+                psf_hdu = pyfits.open(psf_file)
+                psf_supersample =  psf_hdu[0].header['SUPERSMP']  #1./psf_hdu[0].header['PSF_SAMP']
+                psf_hdu.close()
+                print("Setting PSF supersampling to %d based on data from %s" % (psf_supersample, psf_file))
+            except Exception as e:
+                print(e)
+                pass
+
+        #
+        # Now we'll feed the workers' queue
+        #
+        this_catalog_added = 0
+        for src in catalog:
+            src_id = int(src['NUMBER'])
+            feedme_fullfn = "%s.%05d.galfeed" % (basename, src_id)
+            print("inputfeed", feedme_fullfn)
+
+            feedme_fullfn = os.path.join(galfit_dir, feedme_fullfn)
+            # print(feedme_fullfn)
+
+            # _segmentation_cutout_fn = "%s.%05d.segment" % (basename, src_id)
+            # segmentation_cutout_fn = os.path.join(galfit_dir, _segmentation_cutout_fn)
+            #
+            # _segmenation_input_fn =
+
+            galfit_fn = "%s.%05d.galfit.fits" % (basename, src_id)
+            galfit_fullfn = os.path.join(galfit_dir, galfit_fn)
+
+
+            galfit_logfn = "%s.%05d.galfit.log" % (basename, src_id)
+            galfit_fulllogfn = os.path.join(galfit_dir, galfit_logfn)
+
+        #     src_queue.put((
+        #         fn,                 # image_fn,
+        #         feedme_fullfn,      # feedme_fn,
+        #         weight_file,        # weight_fn,
+        #         src,                # src_info,
+        #         hdulist[0].header,  # img_header
+        #         galfit_fullfn,      # galfit output filename
+        #         galfit_fulllogfn,
+        #         segmentation_fn,
+        #         galfit_dir,
+        #         basename,
+        #         args.max_size,
+        #         psf_file, psf_supersample,
+        #         magzero,
+        #     ))
+        #     this_catalog_added += 1
+        #     # print(src)
+        #
+        #     # add to the number of jobs
+        #     with total_feed_count.get_lock():
+        #         total_feed_count.value += 1
+        #
+        #     time.sleep(0.002)
+        #
+        # print("Done with handling catalog %s, added %d new sources for a total of %d" % (
+        #     fn, this_catalog_added, total_feed_count.value
+        # ))
+
+
+
+            # image_fn, feedme_fullfn, weight_fn, src, \
+            #     img_header, galfit_output, galfit_logfile, \
+            #     segmentation_input_fn, galfit_dir, basename, \
+            #     max_size, psf_file, psf_supersample, \
+            #     magzero = (
+            #     fn,                 # image_fn,
+            #     feedme_fullfn,      # feedme_fn,
+            #     weight_file,        # weight_fn,
+            #     src,                # src_info,
+            #     hdulist[0].header,  # img_header
+            #     galfit_fullfn,      # galfit output filename
+            #     galfit_fulllogfn,
+            #     segmentation_fn,
+            #     galfit_dir,
+            #     basename,
+            #     args.max_size,
+            #     psf_file, psf_supersample,
+            #     magzero,
+            # )
+
+            # print(image_fn)
+            if (os.path.isfile(feedme_fullfn)):
+                print("Skipping existing feed-file %s" % (feedme_fullfn))
+
+                if (n_galfit_queuesize is not None):
+                    with n_galfit_queuesize.get_lock():
+                        n_galfit_queuesize.value += 1
+                if (n_galfeeds is not None):
+                    with n_galfeeds.get_lock():
+                        n_galfeeds.value += 1
+                galfit_queue.put((feedme_fullfn, galfit_fullfn, galfit_fulllogfn))
+
+                # queue.task_done()
+                continue
+
+            #
+            # Create the galfit feedme file, the cutouts for the
+            # image, weight-image, and segmentation mask
+            #
+            print("Creating feed-me file %s" % (feedme_fullfn))
+            fwhm = src['FWHM_IMAGE']
+            src_id = int(src['NUMBER'])
+            size = 3 * fwhm
+            if (args.max_size > 0 and size > args.max_size): size = args.max_size
+
+            x, y = src['X_IMAGE']-1, src['Y_IMAGE']-1
+            x1 = int(numpy.max([0, x - size]))
+            x2 = int(numpy.min([x + size, img_header['NAXIS1']]))
+            y1 = int(numpy.max([0, y - size]))
+            y2 = int(numpy.min([y + size, img_header['NAXIS2']]))
+
+            # open the input images and create cutouts
+            img_out_fn = "%s/%s.%05d.image.fits" % (galfit_dir, basename, src_id)
+            segm_out_fn = "%s/%s.%05d.segm.fits" % (galfit_dir, basename, src_id)
+            weight_out_fn = "%s/%s.%05d.sigma.fits" % (galfit_dir, basename, src_id)
+            constraints_opt = "%s.%05d.constraints" % (basename, src_id)
+            constraints_fn = "%s/%s" % (galfit_dir, constraints_opt)
+            psf_out_fn = "%s/%s.%05d.psf.fits" % (galfit_dir, basename, src_id)
+
+            # img_hdu = pyfits.open(image_fn)
+            img = img_hdu[0].data[y1:y2, x1:x2]
+            phdu = pyfits.PrimaryHDU(data=img)
+            phdu.header['SRC_X1'] = x1
+            phdu.header['SRC_Y1'] = y1
+            phdu.writeto(img_out_fn, overwrite=True)
+
+            _, _img = os.path.split(img_out_fn)
+            _weight, _bpm = 'none', 'none'
+            _, _out = os.path.split(galfit_fullfn)
+
+            if (wht_hdu is not None):
+                wht = wht_hdu[0].data[y1:y2, x1:x2]
+                pyfits.PrimaryHDU(data=wht, header=phdu.header).writeto(weight_out_fn, overwrite=True)
+                _, _weight = os.path.split(weight_out_fn)
+
+            if (segm_hdu is not None):
+                try:
+                    segm = segm_hdu[0].data[y1:y2, x1:x2].astype(numpy.int)
+                    segm[segm == src_id] = 0
+                    pyfits.PrimaryHDU(data=segm, header=phdu.header).writeto(segm_out_fn, overwrite=True)
+                    _, _bpm = os.path.split(segm_out_fn)
+                except IOError:
+                    pass
+            else:
+                print("Unable to generate source mask from segmentation file (%s)" % (segmentation_fn))
+
+            if (psf_file is not None):
+                # copy the PSF model
+                shutil.copyfile(psf_file, psf_out_fn)
+                _, galfit_psf_option = os.path.split(psf_out_fn)
+            else:
+                galfit_psf_option = 'none'
+
+
+            #
+            # Generate the constraints file
+            #
+            dx = numpy.hypot(3., 3 * numpy.sqrt(src['ERRX2WIN_IMAGE']))
+            dy = numpy.hypot(3., 3 * numpy.sqrt(src['ERRY2WIN_IMAGE']))
+            # dx = numpy.max([3., 3 * numpy.sqrt(src_info['ERRX2WIN_IMAGE']) + 1.])
+            # dy = numpy.max([3., 3 * numpy.sqrt(src_info['ERRY2WIN_IMAGE']) + 1.])
+            with open(constraints_fn, "w") as cf:
+                constraints = """
+                    1   x   -%(dx).2f %(dx).2f
+                    1   y   -%(dy).2f %(dy).2f    
+                            
+                """ % {
+                    'dx': dx,
+                    'dy': dy,
+                }
+                cf.write("\n".join([c.strip() for c in constraints.splitlines(keepends=False)]))
+
+
+            galfit_info = {
+                'imgfile': _img, #img_out_fn, #image_fn,
+                'srcid': src_id,
+                'x1': 0, #x1,
+                'x2': x2-x1, #x2
+                'y1': 0, #y1,
+                'y2': y2-y1, #y2,
+                'pixelscale': 0.18,
+                'weight_image': _weight, #weight_out_fn if weight_fn is not None else 'none',
+                'galfit_output': _out, #galfit_output,
+                'bpm': _bpm, #segm_out_fn if segmentation_fn is not None else 'none',
+                'psf': galfit_psf_option,
+                'psf_supersample': int(psf_supersample),
+                'magzero': magzero,
+                'constraints': constraints_opt,
+            }
+
+            head_block = """
+                A) %(imgfile)s         # Input data image (FITS file)
+                B) %(galfit_output)s   # Output data image block
+                C) %(weight_image)s                # Sigma image name (made from data if blank or "none") 
+                D) %(psf)s   #        # Input PSF image and (optional) diffusion kernel
+                E) %(psf_supersample)d                   # PSF fine sampling factor relative to data 
+                F) %(bpm)s                # Bad pixel mask (FITS image or ASCII coord list)
+                G) %(constraints)s                # File with parameter constraints (ASCII file) 
+                H) %(x1)d %(x2)d %(y1)d %(y2)d   # Image region to fit (xmin xmax ymin ymax)
+                I) 100    100          # Size of the convolution box (x y)
+                J) %(magzero).3f              # Magnitude photometric zeropoint 
+                K) %(pixelscale).3f %(pixelscale).3f            # Plate scale (dx dy)    [arcsec per pixel]
+                O) regular             # Display type (regular, curses, both)
+                P) 0                   # Choose: 0=optimize, 1=model, 2=imgblock, 3=subcomps
+    
+            """ % (galfit_info)
+                # print(head_block)
+
+            posangle = 90 - src['THETA_IMAGE']
+            src = {
+                'x': x-x1,
+                'y': y-y1,
+                'magnitude': src['MAG_AUTO'],  # +magzero,
+                'halflight_radius': src['FLUX_RADIUS_50'],
+                'sersic_n': 1.5, #src[7],
+                'axis_ratio': 1./src['ELONGATION'],  #sextractur uses a/b, galfit needs b/a
+                'position_angle': posangle,
+
+            }
+            object_block = """
+                # Object number: 1
+                 0) sersic                 #  object type
+                 1) %(x)d  %(y)d  1 1  #  position x, y
+                 3) %(magnitude).3f     1          #  Integrated magnitude	
+                 4) %(halflight_radius).3f      1          #  R_e (half-light radius)   [pix]
+                 5) %(sersic_n).3f      1          #  Sersic index n (de Vaucouleurs n=4) 
+                 6) 0.0000      0          #     ----- 
+                 7) 0.0000      0          #     ----- 
+                 8) 0.0000      0          #     ----- 
+                 9) %(axis_ratio).3f      1          #  axis ratio (b/a)  
+                10) %(position_angle).3f    1          #  position angle (PA) [deg: Up=0, Left=90]
+                 Z) 0                      #  output option (0 = resid., 1 = Don't subtract)
+                
+                # # Object number: 1
+                #  0) devauc                 #  object type
+                #  1) %(x)d  %(y)d  1 1  #  position x, y
+                #  3) %(magnitude).3f     1          #  Integrated magnitude	
+                #  4) %(halflight_radius).3f      1          #  R_e (half-light radius)   [pix]
+                #  9) %(axis_ratio).3f      1          #  axis ratio (b/a)  
+                # 10) %(position_angle).3f    1          #  position angle (PA) [deg: Up=0, Left=90]
+                #  Z) 0                      #  output option (0 = resid., 1 = Don't subtract)
+                # 
+                # # Object number: 1
+                #  0) expdisk                 #  object type
+                #  1) %(x)d  %(y)d  1 1  #  position x, y
+                #  3) %(magnitude).3f     1          #  Integrated magnitude	
+                #  4) %(halflight_radius).3f      1          #  R_e (half-light radius)   [pix]
+                #  9) %(axis_ratio).3f      1          #  axis ratio (b/a)  
+                # 10) %(position_angle).3f    1          #  position angle (PA) [deg: Up=0, Left=90]
+                #  Z) 0                      #  output option (0 = resid., 1 = Don't subtract)
+                
+                # Object number: 2
+                 0) sky                    #  object type
+                 1) 0.0000      1          #  sky background at center of fitting region [ADUs]
+                 2) 0.0000      0          #  dsky/dx (sky gradient in x)
+                 3) 0.0000      0          #  dsky/dy (sky gradient in y)
+                 Z) 0                      #  output option (0 = resid., 1 = Don't subtract) 
+                    
+            """ % src
+            # print(object_block)
+
+            # feedme_fn = "feedme.%d" % (int(src[4]))
+            # feedme_fn = "%s.src%05d.galfeed" % (config_basename, src_id)
+            with open(feedme_fullfn, "w") as feedfile:
+                feedfile.write("\n".join([l.strip() for l in head_block.splitlines()]))
+                feedfile.write("\n".join([l.strip() for l in object_block.splitlines()]))
+
+
+            # Now also prepare the segmentation mask, if available
+
+            # queue up a new execution of galfit
             if (n_galfit_queuesize is not None):
                 with n_galfit_queuesize.get_lock():
                     n_galfit_queuesize.value += 1
             if (n_galfeeds is not None):
                 with n_galfeeds.get_lock():
                     n_galfeeds.value += 1
-            galfit_queue.put((feedme_fn, galfit_output, galfit_logfile))
+            if (total_feed_count is not None):
+                with total_feed_count.get_lock():
+                    total_feed_count.value += 1
 
-            queue.task_done()
-            continue
+            print(feedme_fullfn, galfit_fullfn, galfit_fulllogfn)
+            galfit_queue.put((feedme_fullfn, galfit_fullfn, galfit_fulllogfn))
+            counter += 1
 
-        #
-        # Create the galfit feedme file, the cutouts for the
-        # image, weight-image, and segmentation mask
-        #
-        print("Creating feed-me file %s" % (feedme_fn))
-        fwhm = src_info['FWHM_IMAGE']
-        src_id = int(src_info['NUMBER'])
-        size = 3 * fwhm
-        if (max_size > 0 and size > max_size): size = max_size
-
-        x, y = src_info['X_IMAGE']-1, src_info['Y_IMAGE']-1
-        x1 = int(numpy.max([0, x - size]))
-        x2 = int(numpy.min([x + size, img_header['NAXIS1']]))
-        y1 = int(numpy.max([0, y - size]))
-        y2 = int(numpy.min([y + size, img_header['NAXIS2']]))
-
-        # open the input images and create cutouts
-        img_out_fn = "%s/%s.%05d.image.fits" % (galfit_dir, basename, src_id)
-        segm_out_fn = "%s/%s.%05d.segm.fits" % (galfit_dir, basename, src_id)
-        weight_out_fn = "%s/%s.%05d.sigma.fits" % (galfit_dir, basename, src_id)
-        constraints_opt = "%s.%05d.constraints" % (basename, src_id)
-        constraints_fn = "%s/%s" % (galfit_dir, constraints_opt)
-        psf_out_fn = "%s/%s.%05d.psf.fits" % (galfit_dir, basename, src_id)
-
-        img_hdu = pyfits.open(image_fn)
-        img = img_hdu[0].data[y1:y2, x1:x2]
-        phdu = pyfits.PrimaryHDU(data=img)
-        phdu.header['SRC_X1'] = x1
-        phdu.header['SRC_Y1'] = y1
-        phdu.writeto(img_out_fn, overwrite=True)
+        # close all files
         img_hdu.close()
-
-        _, _img = os.path.split(img_out_fn)
-        _weight, _bpm = 'none', 'none'
-        _, _out = os.path.split(galfit_output)
-
-        if (weight_fn is not None):
-            wht_hdu = pyfits.open(weight_fn)
-            wht = wht_hdu[0].data[y1:y2, x1:x2]
-            pyfits.PrimaryHDU(data=wht, header=phdu.header).writeto(weight_out_fn, overwrite=True)
+        if (wht_hdu is not None):
             wht_hdu.close()
-            _, _weight = os.path.split(weight_out_fn)
+        if (segm_hdu is not None):
+            segm_hdu.close()
 
-        if (segmentation_input_fn is not None):
-            try:
-                segm_hdu = pyfits.open(segmentation_input_fn)
-                segm = segm_hdu[0].data[y1:y2, x1:x2].astype(numpy.int)
-                segm[segm == src_id] = 0
-                pyfits.PrimaryHDU(data=segm, header=phdu.header).writeto(segm_out_fn, overwrite=True)
-                segm_hdu.close()
-                _, _bpm = os.path.split(segm_out_fn)
-            except IOError:
-                pass
-        else:
-            print("Unable to generate source mask from segmentation file (%s)" % (segmentation_input_fn))
-
-        if (psf_file is not None and os.path.isfile(psf_file)):
-            # copy the PSF model
-            shutil.copyfile(psf_file, psf_out_fn)
-            _, galfit_psf_option = os.path.split(psf_out_fn)
-
-            # if (psf_supersample <= 0):
-            #     # this is meant to be auto-scaled
-            #     try:
-            #         psf_hdu = open(psf_out_fn)
-            #         psf_supersample = psf_hdu[0].header['SUPERSMP']
-            #         psf_hdu.close()
-            #     except:
-            #         psf_supersample = 1.
-        else:
-            galfit_psf_option = 'none'
-
-
-        #
-        # Generate the constraints file
-        #
-        dx = numpy.hypot(3., 3 * numpy.sqrt(src_info['ERRX2WIN_IMAGE']))
-        dy = numpy.hypot(3., 3 * numpy.sqrt(src_info['ERRY2WIN_IMAGE']))
-        # dx = numpy.max([3., 3 * numpy.sqrt(src_info['ERRX2WIN_IMAGE']) + 1.])
-        # dy = numpy.max([3., 3 * numpy.sqrt(src_info['ERRY2WIN_IMAGE']) + 1.])
-        with open(constraints_fn, "w") as cf:
-            constraints = """
-                1   x   -%(dx).2f %(dx).2f
-                1   y   -%(dy).2f %(dy).2f    
-                        
-            """ % {
-                'dx': dx,
-                'dy': dy,
-            }
-            cf.write("\n".join([c.strip() for c in constraints.splitlines(keepends=False)]))
-
-
-        galfit_info = {
-            'imgfile': _img, #img_out_fn, #image_fn,
-            'srcid': src_id,
-            'x1': 0, #x1,
-            'x2': x2-x1, #x2
-            'y1': 0, #y1,
-            'y2': y2-y1, #y2,
-            'pixelscale': 0.18,
-            'weight_image': _weight, #weight_out_fn if weight_fn is not None else 'none',
-            'galfit_output': _out, #galfit_output,
-            'bpm': _bpm, #segm_out_fn if segmentation_fn is not None else 'none',
-            'psf': galfit_psf_option,
-            'psf_supersample': int(psf_supersample),
-            'magzero': magzero,
-            'constraints': constraints_opt,
-        }
-
-        head_block = """
-            A) %(imgfile)s         # Input data image (FITS file)
-            B) %(galfit_output)s   # Output data image block
-            C) %(weight_image)s                # Sigma image name (made from data if blank or "none") 
-            D) %(psf)s   #        # Input PSF image and (optional) diffusion kernel
-            E) %(psf_supersample)d                   # PSF fine sampling factor relative to data 
-            F) %(bpm)s                # Bad pixel mask (FITS image or ASCII coord list)
-            G) %(constraints)s                # File with parameter constraints (ASCII file) 
-            H) %(x1)d %(x2)d %(y1)d %(y2)d   # Image region to fit (xmin xmax ymin ymax)
-            I) 100    100          # Size of the convolution box (x y)
-            J) %(magzero).3f              # Magnitude photometric zeropoint 
-            K) %(pixelscale).3f %(pixelscale).3f            # Plate scale (dx dy)    [arcsec per pixel]
-            O) regular             # Display type (regular, curses, both)
-            P) 0                   # Choose: 0=optimize, 1=model, 2=imgblock, 3=subcomps
-
-        """ % (galfit_info)
-            # print(head_block)
-
-        posangle = 90 - src_info['THETA_IMAGE']
-        src_info = {
-            'x': x-x1,
-            'y': y-y1,
-            'magnitude': src_info['MAG_AUTO'],  # +magzero,
-            'halflight_radius': src_info['FLUX_RADIUS_50'],
-            'sersic_n': 1.5, #src[7],
-            'axis_ratio': 1./src_info['ELONGATION'],  #sextractur uses a/b, galfit needs b/a
-            'position_angle': posangle,
-
-        }
-        object_block = """
-            # Object number: 1
-             0) sersic                 #  object type
-             1) %(x)d  %(y)d  1 1  #  position x, y
-             3) %(magnitude).3f     1          #  Integrated magnitude	
-             4) %(halflight_radius).3f      1          #  R_e (half-light radius)   [pix]
-             5) %(sersic_n).3f      1          #  Sersic index n (de Vaucouleurs n=4) 
-             6) 0.0000      0          #     ----- 
-             7) 0.0000      0          #     ----- 
-             8) 0.0000      0          #     ----- 
-             9) %(axis_ratio).3f      1          #  axis ratio (b/a)  
-            10) %(position_angle).3f    1          #  position angle (PA) [deg: Up=0, Left=90]
-             Z) 0                      #  output option (0 = resid., 1 = Don't subtract)
-            
-            # # Object number: 1
-            #  0) devauc                 #  object type
-            #  1) %(x)d  %(y)d  1 1  #  position x, y
-            #  3) %(magnitude).3f     1          #  Integrated magnitude	
-            #  4) %(halflight_radius).3f      1          #  R_e (half-light radius)   [pix]
-            #  9) %(axis_ratio).3f      1          #  axis ratio (b/a)  
-            # 10) %(position_angle).3f    1          #  position angle (PA) [deg: Up=0, Left=90]
-            #  Z) 0                      #  output option (0 = resid., 1 = Don't subtract)
-            # 
-            # # Object number: 1
-            #  0) expdisk                 #  object type
-            #  1) %(x)d  %(y)d  1 1  #  position x, y
-            #  3) %(magnitude).3f     1          #  Integrated magnitude	
-            #  4) %(halflight_radius).3f      1          #  R_e (half-light radius)   [pix]
-            #  9) %(axis_ratio).3f      1          #  axis ratio (b/a)  
-            # 10) %(position_angle).3f    1          #  position angle (PA) [deg: Up=0, Left=90]
-            #  Z) 0                      #  output option (0 = resid., 1 = Don't subtract)
-            
-            # Object number: 2
-             0) sky                    #  object type
-             1) 0.0000      1          #  sky background at center of fitting region [ADUs]
-             2) 0.0000      0          #  dsky/dx (sky gradient in x)
-             3) 0.0000      0          #  dsky/dy (sky gradient in y)
-             Z) 0                      #  output option (0 = resid., 1 = Don't subtract) 
-                
-        """ % src_info
-        # print(object_block)
-
-        # feedme_fn = "feedme.%d" % (int(src[4]))
-        # feedme_fn = "%s.src%05d.galfeed" % (config_basename, src_id)
-        with open(feedme_fn, "w") as feedfile:
-            feedfile.write("\n".join([l.strip() for l in head_block.splitlines()]))
-            feedfile.write("\n".join([l.strip() for l in object_block.splitlines()]))
-
-
-        # Now also prepare the segmentation mask, if available
-
-        # queue up a new execution of galfit
-        if (n_galfit_queuesize is not None):
-            with n_galfit_queuesize.get_lock():
-                n_galfit_queuesize.value += 1
-        if (n_galfeeds is not None):
-            with n_galfeeds.get_lock():
-                n_galfeeds.value += 1
-        galfit_queue.put((feedme_fn, galfit_output, galfit_logfile))
-        counter += 1
-
-        queue.task_done()
-        continue
+        file_queue.task_done()
+        continue # with next catalog
 
     print("Prepared %d galfeeds, queue-size = %d %d" % (
         n_galfeeds.value, n_galfit_queuesize.value, counter))
@@ -295,10 +459,10 @@ def parallel_run_galfit(galfit_queue,
             galfit_queue.task_done()
             break
 
-        if (dryrun):
-            print(cmd)
-            galfit_queue.task_done()
-            continue
+        # if (dryrun):
+        #     print(cmd)
+        #     galfit_queue.task_done()
+        #     continue
 
         feedme_fn, galfit_output_fn, logfile = cmd
         _cwd, _feedfile = os.path.split(feedme_fn)
@@ -312,8 +476,13 @@ def parallel_run_galfit(galfit_queue,
         # galfit_queue.task_done()
         # continue
 
-        if (os.path.isfile(galfit_output_fn) and not redo):
-            print("Skipping galfit run for completed file (%s)" % (galfit_output_fn))
+        galfit_cmd = "%s %s" % (galfit_exe, _feedfile) #feedme_fn)
+
+        if ((os.path.isfile(galfit_output_fn) and not redo) or dryrun):
+            if (dryrun):
+                print("cd %s && %s" % (_cwd, galfit_cmd))
+            else:
+                print("Skipping galfit run for completed file (%s)" % (galfit_output_fn))
             if (n_galfit_queuesize is not None):
                 with n_galfit_queuesize.get_lock():
                     n_galfit_queuesize.value -= 1
@@ -323,7 +492,6 @@ def parallel_run_galfit(galfit_queue,
             galfit_queue.task_done()
             continue
 
-        galfit_cmd = "%s %s" % (galfit_exe, _feedfile) #feedme_fn)
         # galfit_queue.task_done()
         # continue
 
@@ -400,294 +568,20 @@ def parallel_run_galfit(galfit_queue,
         #         n_galfit_queuesize.value*avg_galfit_time,
         #     ))
 
-        # if ((make_plots or True) and os.path.isfile(galfit_output_fn)):
-        #     try:
-        #         plot_galfit_results.plot_galfit_result(
-        #             fits_fn=galfit_output_fn,
-        #             plot_fn=galfit_output_fn[:-5]+".png",
-        #         )
-        #     except:
-        #         print("Error while making plot")
+        if (make_plots and os.path.isfile(galfit_output_fn)):
+            try:
+                plot_galfit_results.plot_galfit_result(
+                    fits_fn=galfit_output_fn,
+                    plot_fn=galfit_output_fn[:-5]+".png",
+                )
+            except:
+                print("Error while making plot")
 
         galfit_queue.task_done()
         continue
 
     print("Shutting down galfit parallel worker-process")
 
-
-
-# def make_galfit_configs(image_fn, catalog_fn, config_basename, weight_image=None):
-#
-#
-#     print (os.path.isfile(cat_fn))
-#     catalog = numpy.loadtxt(cat_fn)
-#     print(catalog.shape)
-#
-#     img_hdu = pyfits.open(image_fn)
-#     magzero = 2.5*numpy.log10(img_hdu[0].header['FLUXMAG0'])
-#
-#     #
-#     # Create the galfit feedme file
-#     #
-#     for src in catalog:
-#
-#         fwhm = src[9]
-#         src_id = int(src[2])
-#         size = 3 * fwhm
-#         x, y = src[3], src[4]
-#         x1 = numpy.max([0, x-size])
-#         x2 = numpy.min([x+size])
-#         y1 = y - size
-#         y2 = y + size
-#
-#         galfit_info = {
-#             'imgfile': img_fn,
-#             'srcid': src_id,
-#             'x1': x1,
-#             'x2': x2,
-#             'y1': y1,
-#             'y2': y2,
-#             'pixelscale': 0.18,
-#             'weight_image': weight_image if weight_image is not None else 'none',
-#         }
-#
-#         head_block = """
-# A) %(imgfile)s         # Input data image (FITS file)
-# B) output_%(srcid)d.fits    # Output data image block
-# C) %(weight_image)s                # Sigma image name (made from data if blank or "none")
-# D) psf.fits   #        # Input PSF image and (optional) diffusion kernel
-# E) 1                   # PSF fine sampling factor relative to data
-# F) none                # Bad pixel mask (FITS image or ASCII coord list)
-# G) none                # File with parameter constraints (ASCII file)
-# H) %(x1)d %(x2)d %(y1)d %(y2)d   # Image region to fit (xmin xmax ymin ymax)
-# I) 100    100          # Size of the convolution box (x y)
-# J) 26.000              # Magnitude photometric zeropoint
-# K) %(pixelscale).3f %(pixelscale).3f            # Plate scale (dx dy)    [arcsec per pixel]
-# O) regular             # Display type (regular, curses, both)
-# P) 0                   # Choose: 0=optimize, 1=model, 2=imgblock, 3=subcomps
-#
-# """ % (galfit_info)
-#         # print(head_block)
-#
-#         src_info = {
-#             'x': x,
-#             'y': y,
-#             'magnitude': src[5], #+magzero,
-#             'halflight_radius': src[22],
-#             'sersic_n': 1.5, #src[7],
-#             'axis_ratio': src[17]/src[16],
-#             'position_angle': src[18],
-#
-#         }
-#         object_block = """
-# # Object number: 1
-#  0) sersic                 #  object type
-#  1) %(x)d  %(y)d  0 0  #  position x, y
-#  3) %(magnitude).3f     1          #  Integrated magnitude
-#  4) %(halflight_radius).3f      1          #  R_e (half-light radius)   [pix]
-#  5) %(sersic_n).3f      1          #  Sersic index n (de Vaucouleurs n=4)
-#  6) 0.0000      0          #     -----
-#  7) 0.0000      0          #     -----
-#  8) 0.0000      0          #     -----
-#  9) %(axis_ratio).3f      1          #  axis ratio (b/a)
-# 10) %(position_angle).3f    1          #  position angle (PA) [deg: Up=0, Left=90]
-#  Z) 0                      #  output option (0 = resid., 1 = Don't subtract)
-#
-# # # Object number: 1
-# #  0) devauc                 #  object type
-# #  1) %(x)d  %(y)d  1 1  #  position x, y
-# #  3) %(magnitude).3f     1          #  Integrated magnitude
-# #  4) %(halflight_radius).3f      1          #  R_e (half-light radius)   [pix]
-# #  9) %(axis_ratio).3f      1          #  axis ratio (b/a)
-# # 10) %(position_angle).3f    1          #  position angle (PA) [deg: Up=0, Left=90]
-# #  Z) 0                      #  output option (0 = resid., 1 = Don't subtract)
-# #
-# # # Object number: 1
-# #  0) expdisk                 #  object type
-# #  1) %(x)d  %(y)d  1 1  #  position x, y
-# #  3) %(magnitude).3f     1          #  Integrated magnitude
-# #  4) %(halflight_radius).3f      1          #  R_e (half-light radius)   [pix]
-# #  9) %(axis_ratio).3f      1          #  axis ratio (b/a)
-# # 10) %(position_angle).3f    1          #  position angle (PA) [deg: Up=0, Left=90]
-# #  Z) 0                      #  output option (0 = resid., 1 = Don't subtract)
-#
-# # Object number: 2
-#  0) sky                    #  object type
-#  1) 0.0000      1          #  sky background at center of fitting region [ADUs]
-#  2) 0.0000      0          #  dsky/dx (sky gradient in x)
-#  3) 0.0000      0          #  dsky/dy (sky gradient in y)
-#  Z) 0                      #  output option (0 = resid., 1 = Don't subtract)
-#
-#
-# """ % src_info
-#         # print(object_block)
-#
-#         # feedme_fn = "feedme.%d" % (int(src[4]))
-#         feedme_fn = "%s.src%05d.galfeed" % (config_basename, src_id)
-#         with open(feedme_fn, "w") as feedfile:
-#             feedfile.write(head_block)
-#             feedfile.write(object_block)
-#
-
-
-def parallel_prep_stage(file_queue, args, total_feed_count, workername=None):
-
-
-    if (workername is not None):
-        print("Worker %s started" % (workername))
-
-    while (True):
-
-        fn = file_queue.get()
-        if (fn is None):
-            print(workername, "received termination token")
-            file_queue.task_done()
-            break
-
-        # open input image
-        hdulist = pyfits.open(fn)
-
-        try:
-            magzero = 2.5 * numpy.log10(hdulist[0].header['FLUXMAG0'])
-        except:
-            magzero = 0
-
-        # construct all filenames we need
-        bn,_ = os.path.splitext(fn)
-        #basename = os.path.split(bn)
-        basedir,basename = os.path.split(bn)
-        catalog_fn = "%s.%s" % (bn, args.catalog_extension)
-
-        segmentation_fn = "%s.segments" % (bn)
-        if (not os.path.isfile(segmentation_fn)):
-            print("Unable to use segmentation masks from %s" % (segmentation_fn))
-            segmentation_fn = None
-
-        # load catalog
-        if (not os.path.isfile(catalog_fn)):
-            print("Unable to open catalog %s" % (catalog_fn))
-            file_queue.task_done()
-            continue
-
-        # catalog = numpy.loadtxt(catalog_fn)
-        try:
-            catalog = astropy.table.Table.read(catalog_fn)
-            print("done loading catalog (%s)" % (catalog_fn))
-        except (IOError, ValueError) as e:
-            print("Unable to open catalog %s (%s)" % (catalog_fn, e.message))
-            file_queue.task_done()
-            continue
-
-
-        if (args.galfit_directory.find(":") >= 0):
-            _parts = args.galfit_directory.split(":")
-            _search = _parts[0]
-            _replace = _parts[1]
-            galfit_dir = fn.replace(_search, _replace)
-        else:
-            galfit_dir = os.path.join(basedir, args.galfit_directory)
-
-        if (not os.path.isdir(galfit_dir)):
-            print("Creating directory: %s" % (galfit_dir))
-            os.makedirs(galfit_dir)
-
-
-        # also work out the appropriate weight filename
-        if (args.weight_file.find(":") >= 0):
-            _parts = args.weight_file.split(":")
-            _search = _parts[0]
-            _replace = _parts[1]
-            weight_file = fn.replace(_search, _replace)
-        else:
-            weight_file = args.weight_file
-
-        #
-        # also construct the appropriate filename for the PSF
-        #
-        if (args.psf is not None):
-            if (args.psf.find(":") >= 0):
-                # we need to do some replacing here
-                _parts = args.psf.split(":")
-                _search = _parts[0]
-                _replace = _parts[1]
-                psf_file = fn.replace(_search, _replace)
-            else:
-                psf_file = args.psf
-        else:
-            psf_file = None
-
-        #
-        # Read PSF supersampling from PSF-file if available or default to 1
-        #
-        psf_supersample = 1.
-        if (args.psf_supersample <= 0 and psf_file is not None):
-            try:
-                psf_hdu = pyfits.open(psf_file)
-                psf_supersample =  psf_hdu[0].header['SUPERSMP']  #1./psf_hdu[0].header['PSF_SAMP']
-                psf_hdu.close()
-                print("Setting PSF supersampling to %d based on data from %s" % (psf_supersample, psf_file))
-            except Exception as e:
-                print(e)
-                pass
-
-        #
-        # Now we'll feed the workers' queue
-        #
-        this_catalog_added = 0
-        for src in catalog[:10]:
-            src_id = int(src['NUMBER'])
-            feedme_fn = "%s.%05d.galfeed" % (basename, src_id)
-            print("inputfeed", feedme_fn)
-
-            feedme_fullfn = os.path.join(galfit_dir, feedme_fn)
-            # print(feedme_fullfn)
-
-            # _segmentation_cutout_fn = "%s.%05d.segment" % (basename, src_id)
-            # segmentation_cutout_fn = os.path.join(galfit_dir, _segmentation_cutout_fn)
-            #
-            # _segmenation_input_fn =
-
-            galfit_fn = "%s.%05d.galfit.fits" % (basename, src_id)
-            galfit_fullfn = os.path.join(galfit_dir, galfit_fn)
-
-
-            galfit_logfn = "%s.%05d.galfit.log" % (basename, src_id)
-            galfit_fulllogfn = os.path.join(galfit_dir, galfit_logfn)
-
-            src_queue.put((
-                fn,                 # image_fn,
-                feedme_fullfn,      # feedme_fn,
-                weight_file,        # weight_fn,
-                src,                # src_info,
-                hdulist[0].header,  # img_header
-                galfit_fullfn,      # galfit output filename
-                galfit_fulllogfn,
-                segmentation_fn,
-                galfit_dir,
-                basename,
-                args.max_size,
-                psf_file, psf_supersample,
-                magzero,
-            ))
-            this_catalog_added += 1
-            # print(src)
-
-            # add to the number of jobs
-            with total_feed_count.get_lock():
-                total_feed_count.value += 1
-
-            time.sleep(0.002)
-
-        print("Done with handling catalog %s, added %d new sources for a total of %d" % (
-            fn, this_catalog_added, total_feed_count.value
-        ))
-
-        file_queue.task_done()
-
-        pass
-
-    print("Shutting down %s" % (workername if workername is not None else ""))
-    return
 
 
 if __name__ == "__main__":
@@ -766,134 +660,10 @@ if __name__ == "__main__":
 
     ##########################################################################
     #
-    # First, handle all the jobs to load catalogs and generate the
-    # list of feedme files that need to be written
-    #
-    # TODO: Merge the catalog reader and feedme-writer jobs into one; this
-    #   should also increase speed by not having to open input files repeatedly
-    #   from different processes
+    # Stert up all GALFIT execution workers first so they can go straight to
+    # work as soon as the first feedme files are written
     #
     ##########################################################################
-
-
-    #
-    # Next, start up the workers to feed to configuration writer workers
-    #
-    total_feed_count = multiprocessing.Value('i', 0)
-    input_file_queue = multiprocessing.JoinableQueue()
-    catalog_handler_processes = []
-    for i in range(15):
-        workername = "CatalogPrepper_%d" % (i+1)
-        p = multiprocessing.Process(
-            target=parallel_prep_stage,
-            kwargs=dict(
-                file_queue=input_file_queue,
-                args=args,
-                total_feed_count=total_feed_count,
-                workername=workername,
-            )
-        )
-        p.daemon = True
-        p.start()
-        catalog_handler_processes.append((p,workername))
-
-    # next, feed the queue
-    for fn in args.input_images:
-        input_file_queue.put(fn)
-
-    # and also add the termination token
-    print("Adding shutdown signals to catalog handlers")
-    for p in catalog_handler_processes:
-        input_file_queue.put(None)
-
-    # now wait for all catalogs to be read and the work to be queued up
-    # for the actual workers
-    input_file_queue.join()
-    # while (True):
-    #     print("Waiting for all catalogs to be processed")
-    #     one_still_alive = False
-    #     for (p,wn) in catalog_handler_processes:
-    #         p.join(0.1)
-    #         one_still_alive |= p.is_alive()
-    #         print(wn,"still alive", p.is_alive())
-    #     if (not one_still_alive):
-    #         break
-    #     time.sleep(0.5)
-        #print(wn, p.is_alive())
-
-
-    ##########################################################################
-    #
-    # Next, we'll handle all the file writers
-    #
-    ##########################################################################
-
-    #
-    # First start all workers so they can start working right away
-    #
-    feedme_workers = []
-    print("Starting up %d parallel Galfit workers" % (args.number_processes))
-    for i in range(args.number_processes):
-        workername = "FeedmeWriter_%03d" % (i+1)
-        p = multiprocessing.Process(
-            target=parallel_config_writer,
-            kwargs=dict(queue=src_queue,
-                        galfit_queue=galfit_queue,
-                        n_galfeeds=n_galfeeds,
-                        n_galfit_queuesize=n_galfit_queuesize,
-                        workername=workername,
-                        ),
-        )
-        p.daemon = True
-        p.start()
-        feedme_workers.append((p,workername))
-    print("Feed-me creation workers started")
-
-
-
-    print("Adding token to file writer workers")
-    # Also add the worker termination token to the job queue
-
-    time.sleep(5)
-    for p in feedme_workers:
-        src_queue.put((None))
-
-    print("waiting")
-    time.sleep(10)
-
-    print("Joining feedme-writer queue")
-    while (True):
-        print("Waiting for all Galfeed files to be written")
-        one_still_alive = False
-        for (p,wn) in feedme_workers:
-            p.join(0.1)
-            one_still_alive |= p.is_alive()
-            print(wn,"still alive", p.is_alive())
-        print("All dead?", all_dead)
-        if (not one_still_alive):
-            break
-        time.sleep(1)
-
-    sys.exit(-1)
-
-    # for i in feedme_workers:
-    #     p.join()
-    src_queue.join()
-
-    # sys.exit(-1)
-
-    print("Done creating all GALFIT config files, joining the fun!")
-    # print(n_galfeeds, n_galfit_queuesize)
-    # time.sleep(1)
-
-    # counter = 0
-    # while(True):
-    #     cmd = galfit_queue.get()
-    #     galfit_queue.task_done()
-    #     if (cmd is not None):
-    #         counter += 1
-    #     print(counter, n_galfeeds.value)
-
 
     print("Starting up the GALFIT workers")
     galfit_workers = []
@@ -918,6 +688,97 @@ if __name__ == "__main__":
         galfit_workers.append(p)
         # galfit_queue.put((None))
     print("All Galfit workers started")
+
+
+
+
+    ##########################################################################
+    #
+    # First, handle all the jobs to load catalogs and generate the
+    # list of feedme files that need to be written
+    #
+    # TODO: Merge the catalog reader and feedme-writer jobs into one; this
+    #   should also increase speed by not having to open input files repeatedly
+    #   from different processes
+    #
+    ##########################################################################
+
+
+    #
+    # Next, start up the workers to read the input catalogs and generate the
+    # galfit feedme configuration files
+    #
+    total_feed_count = multiprocessing.Value('i', 0)
+    input_file_queue = multiprocessing.JoinableQueue()
+
+    for fn in args.input_images:
+        input_file_queue.put(fn)
+
+    feedme_workers = []
+    print("Starting up %d parallel Galfit workers" % (args.number_processes))
+    for i in range(1):
+        workername = "FeedmeWriter_%03d" % (i+1)
+        p = multiprocessing.Process(
+            target=parallel_config_writer,
+            kwargs=dict(file_queue=input_file_queue,
+                        galfit_queue=galfit_queue,
+                        n_galfeeds=n_galfeeds,
+                        n_galfit_queuesize=n_galfit_queuesize,
+                        total_feed_count=total_feed_count,
+                        workername=workername,
+                        ),
+        )
+        p.daemon = True
+        p.start()
+        feedme_workers.append((p,workername))
+    print("Feed-me creation workers started")
+
+
+    print("Adding token to file writer workers")
+    # Also add the worker termination token to the job queue
+
+    # time.sleep(5)
+    for p in feedme_workers:
+        input_file_queue.put((None))
+
+    print("waiting")
+    # time.sleep(10)
+
+    # print("Joining feedme-writer queue")
+    # while (True):
+    #     print("Waiting for all Galfeed files to be written")
+    #     one_still_alive = False
+    #     for (p,wn) in feedme_workers:
+    #         p.join(0.1)
+    #         one_still_alive |= p.is_alive()
+    #         print(wn,"still alive", p.is_alive())
+    #     print("All dead?", all_dead)
+    #     if (not one_still_alive):
+    #         break
+    #     time.sleep(1)
+
+    # wait for all files to be generated and shut down workers
+    input_file_queue.join()
+    for (p,wn) in feedme_workers:
+        p.join()
+
+    print("all done!")
+
+
+
+    print("Done creating all %d GALFIT config files, joining the fun!" % (
+        n_galfit_queuesize.value))
+    # print(n_galfeeds, n_galfit_queuesize)
+    # time.sleep(1)
+
+    # counter = 0
+    # while(True):
+    #     cmd = galfit_queue.get()
+    #     galfit_queue.task_done()
+    #     if (cmd is not None):
+    #         counter += 1
+    #     print(counter, n_galfeeds.value)
+
 
     # wait for all config files to be written
     # for i in range(30):
@@ -959,7 +820,7 @@ if __name__ == "__main__":
 
 
     # galfit_queue.join()
-    print("done with all work!")
+    print("\ndone with all work!")
 
     # img_fn = sys.argv[1]
     # cat_fn = sys.argv[2]
