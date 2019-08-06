@@ -80,6 +80,7 @@ def completeness_worker(file_queue, src_img, img_size, psf_file,
     psf_sampling = psf_hdu[0].header['SUPERSMP']
 
     img_hdr = src_img[0].header
+    img_data = src_img[0].data
     pixelscale = img_hdr['CD2_2'] * 3600.
     magzero = 2.5*numpy.log10(img_hdr['FLUXMAG0']) if 'FLUXMAG0' in img_hdr else 27.0
     print("Pixelscale:", pixelscale, ", PSF-sampling:", psf_sampling)
@@ -99,6 +100,7 @@ def completeness_worker(file_queue, src_img, img_size, psf_file,
         model_assembly = numpy.zeros_like(src_img[0].data)
         print(model_assembly.shape)
 
+        chunk_id = job['chunk_id']
 
         ###########
         #
@@ -154,7 +156,8 @@ def completeness_worker(file_queue, src_img, img_size, psf_file,
                 psf_file=psf_bn,
                 psf_sampling=psf_sampling,
                 dx=pixelscale, dy=pixelscale,
-                img_x=minisize, img_y=minisize,
+                img_x=(x2-x1), #minisize,
+                img_y=(y2-y1), #minisize,
                 magzero=magzero,
             )
             ff.write("\n".join([l.strip() for l in ff_header.splitlines(keepends=False)]))
@@ -249,7 +252,45 @@ def completeness_worker(file_queue, src_img, img_size, psf_file,
             print("Galfit returned after %.3f seconds" % (end_time - start_time))
             # print(n_galfit_queuesize, n_galfit_complete, n_total_galfit_time)
 
+            try:
+                model_hdu = pyfits.open(model_only_fn)
+            except (FileNotFoundError, OSError) as e:
+                print("Bad model file:", e)
+            model_img = model_hdu[0].data
+            model_assembly[y1:y2, x1:x2] += model_img
+            model_hdu.close()
+
             # logger.debug("%s ==> %d" % (galfit_cmd, returncode))
+
+        ###############################
+        #
+        # Now we have all models in one batch completed
+        #
+        ###############################
+        chunk_models_fn = os.path.join(output_dir, "modelchunk_%05d.raw.fits" % (chunk_id))
+        pyfits.PrimaryHDU(data=model_assembly).writeto(chunk_models_fn, overwrite=True)
+
+        #
+        # Also add the model images to the actual input images to generate
+        # the full simulated data used for completeness analysis
+        #
+        comp_image_fn = os.path.join(output_dir, "modelchunk_%05d.fits" % (chunk_id))
+        completeness_input = img_data + model_assembly
+        completeness_hdu = pyfits.PrimaryHDU(
+            data=completeness_input,
+            header=img_hdr,
+        )
+        completeness_hdu.writeto(comp_image_fn, overwrite=True)
+
+
+        ###############################
+        #
+        # TODO: implement...
+        # Next up: Run SourceExtractor on the newly generated simulated image,
+        # load the resulting catalog and find for sources that are not part of
+        # the reference catalog generated from only the input image
+        #
+        ###############################
 
         # print(job['params'])
         file_queue.task_done()
@@ -273,7 +314,7 @@ if __name__ == "__main__":
     cmdline.add_argument("--params", dest="sex_params", default=os.path.join(config_dir, "sex4psfex.param"),
                          help="number of models to insert into each image")
     cmdline.add_argument("--nprocs", dest="number_processes", type=int,
-                         default=1, #multiprocessing.cpu_count(),
+                         default=4, #multiprocessing.cpu_count(),
                          help="number of Sextractors to run in parallel")
     cmdline.add_argument("--sex", dest="sex_exe", default=distutils.spawn.find_executable("sex"),
                          help="location of SExtractor executable")
@@ -288,9 +329,9 @@ if __name__ == "__main__":
                          help="reference catalog")
 
 
-    cmdline.add_argument("--mag", dest='mag', default="18..20:0.5",
+    cmdline.add_argument("--mag", dest='mag', default="21..24:0.5",
                          help="magnitude-range, from-to:step")
-    cmdline.add_argument("--re", dest='r_eff', default="10..50:5",
+    cmdline.add_argument("--re", dest='r_eff', default="5..50:5",
                          help="effective radius range, from-to:step")
     cmdline.add_argument("--ar", dest='axisratio', default="0.2..1:0.2",
                          help="axis ratio range, from-to:step")
@@ -472,7 +513,7 @@ if __name__ == "__main__":
         #
         chunksize = args.models_per_frame
         n_chunks = int(numpy.ceil(total_number_of_models / chunksize))
-        n_chunks=2
+        n_chunks=4
         for chunk in range(n_chunks):
 
             file_queue.put(dict(
