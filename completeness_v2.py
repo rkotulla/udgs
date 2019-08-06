@@ -67,7 +67,8 @@ def set_or_replace(input_fn, param):
 
 
 def completeness_worker(file_queue, src_img, img_size, psf_file,
-                        output_dir, singles_dir, singles_size):
+                        output_dir, singles_dir, singles_size,
+                        galfit_exe):
 
     print("Worker started")
     # print(src_img.info())
@@ -123,7 +124,9 @@ def completeness_worker(file_queue, src_img, img_size, psf_file,
             #
             feedme_fn = os.path.join(singles_dir, "model_%06d.feedme" % (src['id']))
             model_only_fn = os.path.join(singles_dir, "model_%06d.raw.fits" % (src['id']))
+            galfit_logfile = "model_%06d.galfit.log" % (src['id'])
 
+            _, feedme_bn = os.path.split(feedme_fn)
             _,_model_only_fn = os.path.split(model_only_fn)
             _, psf_bn = os.path.split(psf_file)
 
@@ -202,7 +205,51 @@ def completeness_worker(file_queue, src_img, img_size, psf_file,
             #
             ################################
 
+            galfit_cmd = "%s %s" % (galfit_exe, feedme_bn) #feedme_fn)
+            galfit_timeout = 300
 
+            start_time = time.time()
+            returncode = -99999999
+            try:
+                with subprocess.Popen(galfit_cmd.split(),
+                                      stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE,
+                                      cwd=singles_dir) as galfit_process:
+                    try:
+                        _stdout, _stderr = galfit_process.communicate(
+                            input=None, timeout=galfit_timeout)
+
+                        returncode = galfit_process.returncode
+                        if (galfit_process.returncode != 0):
+                            print("return code was not 0 (%d)" % (
+                                galfit_process.returncode))
+                            print(str(_stdout))
+                            print(str(_stderr))
+                        # print(_stdout)
+
+                        with open(galfit_logfile, "wb") as log:
+                            log.write(_stdout)
+                            # log.write("\n*10STDERR\n========\n")
+                            log.write(_stderr)
+
+                    except (TimeoutError,
+                            subprocess.TimeoutExpired) as e:  # TimeoutExpired
+                        galfit_process.kill()
+                        print("Terminating galfit after timeout")
+                        returncode = -9999999
+
+                        # problem_str = "%s ::: %s\n" % (
+                        # feedme_fn, " ".join(galfit_cmd.split()))
+                        # problems_queue.put(problem_str)
+
+            except OSError as e:
+                print("Some exception has occured:\n%s" % (str(e)))
+            end_time = time.time()
+            galfit_time = end_time - start_time
+            print("Galfit returned after %.3f seconds" % (end_time - start_time))
+            # print(n_galfit_queuesize, n_galfit_complete, n_total_galfit_time)
+
+            # logger.debug("%s ==> %d" % (galfit_cmd, returncode))
 
         # print(job['params'])
         file_queue.task_done()
@@ -230,6 +277,8 @@ if __name__ == "__main__":
                          help="number of Sextractors to run in parallel")
     cmdline.add_argument("--sex", dest="sex_exe", default=distutils.spawn.find_executable("sex"),
                          help="location of SExtractor executable")
+    cmdline.add_argument("--galfit", dest="galfit_exe", default=distutils.spawn.find_executable("galfit"),
+                         help="location ofGalfit executable")
     cmdline.add_argument("--weight", dest='weight_image', type=str, default=None,
                          help="weight map")
     cmdline.add_argument("--psf", dest='psf_image', type=str, default="_image.fits:_psf.fits",
@@ -410,6 +459,7 @@ if __name__ == "__main__":
                     output_dir=output_dirname,
                     singles_dir=singles_dirname,
                     singles_size=300,
+                    galfit_exe=args.galfit_exe,
                 )
             )
             p.daemon = True
@@ -422,7 +472,7 @@ if __name__ == "__main__":
         #
         chunksize = args.models_per_frame
         n_chunks = int(numpy.ceil(total_number_of_models / chunksize))
-        n_chunks=5
+        n_chunks=2
         for chunk in range(n_chunks):
 
             file_queue.put(dict(
