@@ -14,7 +14,7 @@ import astropy.table
 import astropy.io.fits as pyfits
 import numpy
 import distutils.spawn
-
+import shutil
 
 
 def range_to_list(arg):
@@ -66,10 +66,11 @@ def set_or_replace(input_fn, param):
     return out
 
 
-def completeness_worker(file_queue, src_img, img_size, psf_file, output_dir):
+def completeness_worker(file_queue, src_img, img_size, psf_file,
+                        output_dir, singles_dir, singles_size):
 
     print("Worker started")
-    print(src_img.info())
+    # print(src_img.info())
 
     #
     # Find out some basics about the image and the PSF model
@@ -84,6 +85,8 @@ def completeness_worker(file_queue, src_img, img_size, psf_file, output_dir):
 
     (img_x, img_y) = img_size
 
+    minisize = 2*(singles_size//2)+1
+    halfsize = (minisize-2)//2
     while (True):
 
         job = file_queue.get()
@@ -91,71 +94,115 @@ def completeness_worker(file_queue, src_img, img_size, psf_file, output_dir):
             file_queue.task_done()
             break
 
-        chunk = job['chunk_id']
-        #
-        # Generate all filenames we will need
-        #
-        feedme_fn = os.path.join(output_dir, "model_%05d.feedme" % (chunk))
-        model_only_fn = os.path.join(output_dir, "model_%05d.raw.fits" % (chunk))
+        # Generate one full-frame image to receive all individual model images
+        model_assembly = numpy.zeros_like(src_img[0].data)
+        print(model_assembly.shape)
 
-        print("Generating feed-me file: %s" % (feedme_fn))
-        ff = open(feedme_fn, "w")
-        ff.write("""\
-A) 
-B) %(model_only_fn)s   # Output data image block
-C)                 # Sigma image name (made from data if blank or "none")
-D) %(psf_file)s   #        # Input PSF image and (optional) diffusion kernel
-E) %(psf_sampling)d                   # PSF fine sampling factor relative to data
-F)                 # Bad pixel mask (FITS image or ASCII coord list)
-G)                 # File with parameter constraints (ASCII file)
-H) 0 %(img_x)d 0 %(img_y)d   # Image region to fit (xmin xmax ymin ymax)
-I) 100    100          # Size of the convolution box (x y)
-J) %(magzero).3f              # Magnitude photometric zeropoint
-K) %(dx).3f %(dy).3f            # Plate scale (dx dy)    [arcsec per pixel]
-O) regular             # Display type (regular, curses, both)
-P) 0                   # Choose: 0=optimize, 1=model, 2=imgblock, 3=subcomps
-        """ % dict(
-            model_only_fn=model_only_fn,
-            psf_file=psf_file,
-            psf_sampling=psf_sampling,
-            dx=pixelscale, dy=pixelscale,
-            img_x=img_x, img_y=img_y,
-            magzero=magzero,
-        ))
 
+        ###########
         #
-        # Now generate all the model definitions
+        # Generate all individual models
         #
-        params = job['params']
-        positions = job['positions']
-        n_galaxies = params.shape[0]
-        for gal in range(n_galaxies):
-            ff.write("""\
-# Object number: %(i)d
-0) sersic                 #  object type
-1) %(x).3f %(y).3f  1 1  #  position x, y
-3) %(mag).3f     1          #  Integrated magnitude
-4) %(reff).3f      1          #  R_e (half-light radius)   [pix]
-5) %(sersic).3f      1          #  Sersic index n (de Vaucouleurs n=4)
-6) 0.0000      0          #     -----
-7) 0.0000      0          #     -----
-8) 0.0000      0          #     -----
-9) %(axisratio).3f      1          #  axis ratio (b/a)
-10) %(posangle).3f    1          #  position angle (PA) [deg: Up=0, Left=90]
-Z) 0                      #  output option (0 = resid., 1 = Don't subtract)
+        ###########
+        for i, src in job['sources'].iterrows():
+            # print(src['id'])
 
+
+            #
+            # Work out how we can fit each individual model image into the
+            # full frame, making sure to truncate frames along the edges
+            #
+            x, y = src['cx']-1, src['cy']-1
+            x1 = int(numpy.max([0, x - halfsize]))
+            x2 = int(numpy.min([x + halfsize, img_hdr['NAXIS1']]))
+            y1 = int(numpy.max([0, y - halfsize]))
+            y2 = int(numpy.min([y + halfsize, img_hdr['NAXIS2']]))
+
+            #
+            # Generate all filenames we will need
+            #
+            feedme_fn = os.path.join(singles_dir, "model_%06d.feedme" % (src['id']))
+            model_only_fn = os.path.join(singles_dir, "model_%06d.raw.fits" % (src['id']))
+
+            _,_model_only_fn = os.path.split(model_only_fn)
+            _, psf_bn = os.path.split(psf_file)
+
+            print("Generating feed-me file: %s" % (feedme_fn))
+            # job['xxx'].info()
+
+
+            ff = open(feedme_fn, "w")
+            ff_header = """
+                A) 
+                B) %(model_only_fn)s   # Output data image block
+                C)                 # Sigma image name (made from data if blank or "none")
+                D) %(psf_file)s   #        # Input PSF image and (optional) diffusion kernel
+                E) %(psf_sampling)d                   # PSF fine sampling factor relative to data
+                F)                 # Bad pixel mask (FITS image or ASCII coord list)
+                G)                 # File with parameter constraints (ASCII file)
+                H) 0 %(img_x)d 0 %(img_y)d   # Image region to fit (xmin xmax ymin ymax)
+                I) 200    200          # Size of the convolution box (x y)
+                J) %(magzero).3f              # Magnitude photometric zeropoint
+                K) %(dx).3f %(dy).3f            # Plate scale (dx dy)    [arcsec per pixel]
+                O) regular             # Display type (regular, curses, both)
+                P) 0                   # Choose: 0=optimize, 1=model, 2=imgblock, 3=subcomps
             """ % dict(
-                i=gal+1,
-                x=positions[gal,0],
-                y=positions[gal,1],
-                mag=params[gal,0],
-                reff=params[gal,1],
-                sersic=params[gal,3],
-                axisratio=params[gal,2],
-                posangle=params[gal,4],
-            ))
+                model_only_fn=_model_only_fn,
+                psf_file=psf_bn,
+                psf_sampling=psf_sampling,
+                dx=pixelscale, dy=pixelscale,
+                img_x=minisize, img_y=minisize,
+                magzero=magzero,
+            )
+            ff.write("\n".join([l.strip() for l in ff_header.splitlines(keepends=False)]))
 
-        ff.close()
+            #
+            # Now generate all the model definitions
+            #
+            # params = job['params']
+            # positions = job['positions']
+            # n_galaxies = params.shape[0]
+            # for gal in range(n_galaxies):
+            src_def = """
+            
+                # Object number: %(i)d
+                0) sersic                 #  object type
+                1) %(x).3f %(y).3f  1 1  #  position x, y
+                3) %(mag).3f     1          #  Integrated magnitude
+                4) %(reff).3f      1          #  R_e (half-light radius)   [pix]
+                5) %(sersic).3f      1          #  Sersic index n (de Vaucouleurs n=4)
+                6) 0.0000      0          #     -----
+                7) 0.0000      0          #     -----
+                8) 0.0000      0          #     -----
+                9) %(axisratio).3f      1          #  axis ratio (b/a)
+                10) %(posangle).3f    1          #  position angle (PA) [deg: Up=0, Left=90]
+                Z) 0                      #  output option (0 = resid., 1 = Don't subtract)
+                
+                ###-X1: %(x1)d
+                ###-Y1: %(y1)d
+            """ % dict(
+                i=src['id'],
+                x=src['cx']-x1, #'(minisize-1)//2, #positions[gal,0],
+                y=src['cy']-y1, #'(minisize-1)//2, #positions[gal,1],
+                mag=src['final_mag'],
+                reff=src['final_r_eff'],
+                sersic=src['final_sersic'],
+                axisratio=src['final_axisratio'],
+                posangle=src['final_posangle'],
+                x1=x1, y1=y1,
+            )
+            ff.write("\n".join(l.strip() for l in src_def.splitlines(keepends=False)))
+
+            ff.close()
+
+            ################################
+            #
+            # Now we have everything in place we need to run galfit and
+            # create the simulated model image
+            #
+            ################################
+
+
 
         # print(job['params'])
         file_queue.task_done()
@@ -253,16 +300,16 @@ if __name__ == "__main__":
     params = itertools.product(model_mags, model_radius, model_axisratio, model_sersic, model_posangle)
     # print(list(params))
     full_params = numpy.array(list(params) * args.n_models)
-    print(full_params.shape)
+    # print(full_params.shape)
 
     pandas_columns = ['mags', 'r_eff', 'axisratio', 'sersic', 'posangle',
                       'cx', 'cy',
                       'd_mag', 'd_r_reff', 'd_axisratio', 'd_sersic', 'd_posangle',
-                      'final_mag', 'final_r_reff', 'final_axisratio', 'final_sersic', 'final_posangle',
+                      'final_mag', 'final_r_eff', 'final_axisratio', 'final_sersic', 'final_posangle',
     ]
 
     pandas_params = pandas.DataFrame(full_params, columns=['mags', 'r_eff', 'axisratio', 'sersic', 'posangle'])
-    pandas_params.info()
+    # pandas_params.info()
 
     for filename in args.input_images:
 
@@ -284,20 +331,27 @@ if __name__ == "__main__":
 
         # get output directory name
         output_dirname = set_or_replace(filename, args.dirname)
+        singles_dirname = os.path.join(output_dirname, "singles")
         if (not os.path.isdir(output_dirname)):
             os.makedirs(output_dirname)
+        if (not os.path.isdir(singles_dirname)):
+            os.makedirs(singles_dirname)
 
         #
         # Figure out the other files needed for this one
         #
         psf_file = set_or_replace(filename, args.psf_image)
+        #
+        # also copy the PSF image to the singles directory
+        _,bn = os.path.split(psf_file)
+        shutil.copy(psf_file, os.path.join(singles_dirname, bn))
 
         #
         # Now add the scatter to each of the datapoints
         #
         param_scatter = (numpy.random.random(size=full_params.shape) - 0.5) * \
                      [scatter_mags, scatter_radius, scatter_axisratio, scatter_sersic, scatter_posangle]
-        print(param_scatter[:20])
+        # print(param_scatter[:20])
 
         final_params = full_params + param_scatter
 
@@ -312,7 +366,7 @@ if __name__ == "__main__":
         # print(permutater[:25])
         # combine all parameters into a single array
         param_data = numpy.hstack((full_params, positions, param_scatter, final_params))
-        print(param_data.shape)
+        # print(param_data.shape)
         #
         # apply shuffeling
         param_data_shuffled = param_data[permutater]
@@ -322,7 +376,7 @@ if __name__ == "__main__":
         #
         pandas_params = pandas.DataFrame(param_data_shuffled, columns=pandas_columns)
         pandas_params['id'] = numpy.arange(param_data_shuffled.shape[0], dtype=numpy.int)
-        pandas_params.info()
+        # pandas_params.info()
 
         #
         # add unique ID to each source
@@ -334,7 +388,7 @@ if __name__ == "__main__":
         print("Writing completeness log to %s" % (model_log_filename))
         # pandas_params.to_csv(model_log_filename)
         ap_params = astropy.table.Table.from_pandas(pandas_params)
-        ap_params.info()
+        # ap_params.info()
         ap_params.write(model_log_filename, format='fits', overwrite=True)
 
         model_params = (full_params + param_scatter)[permutater]
@@ -354,6 +408,8 @@ if __name__ == "__main__":
                     img_size=(img_x,img_y),
                     psf_file=psf_file,
                     output_dir=output_dirname,
+                    singles_dir=singles_dirname,
+                    singles_size=300,
                 )
             )
             p.daemon = True
@@ -373,6 +429,7 @@ if __name__ == "__main__":
                 positions=positions[chunk*chunksize:(chunk+1)*chunksize],
                 params=model_params[chunk*chunksize:(chunk+1)*chunksize],
                 chunk_id=chunk,
+                sources=pandas_params[chunk*chunksize:(chunk+1)*chunksize],
             ))
 
 
