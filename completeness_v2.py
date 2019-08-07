@@ -16,6 +16,12 @@ import numpy
 import distutils.spawn
 import shutil
 
+import run_sextractor
+
+import ldac2vot
+
+fix_vot_array_data = ldac2vot.read_definitions("FLUX_RADIUS:50,80")
+
 
 def range_to_list(arg):
 
@@ -68,7 +74,10 @@ def set_or_replace(input_fn, param):
 
 def completeness_worker(file_queue, src_img, img_size, psf_file,
                         output_dir, singles_dir, singles_size,
-                        galfit_exe):
+                        galfit_exe,
+                        sex_exe, sex_conf, sex_param,
+                        weight_fn,
+                        ):
 
     print("Worker started")
     # print(src_img.info())
@@ -107,6 +116,7 @@ def completeness_worker(file_queue, src_img, img_size, psf_file,
         # Generate all individual models
         #
         ###########
+        total_galfit_time = 0.
         for i, src in job['sources'].iterrows():
             # print(src['id'])
 
@@ -132,7 +142,7 @@ def completeness_worker(file_queue, src_img, img_size, psf_file,
             _,_model_only_fn = os.path.split(model_only_fn)
             _, psf_bn = os.path.split(psf_file)
 
-            print("Generating feed-me file: %s" % (feedme_fn))
+            # print("Generating feed-me file: %s" % (feedme_fn))
             # job['xxx'].info()
 
 
@@ -249,7 +259,8 @@ def completeness_worker(file_queue, src_img, img_size, psf_file,
                 print("Some exception has occured:\n%s" % (str(e)))
             end_time = time.time()
             galfit_time = end_time - start_time
-            print("Galfit returned after %.3f seconds" % (end_time - start_time))
+            total_galfit_time += galfit_time
+            # print("Galfit returned after %.3f seconds" % (galfit_time))
             # print(n_galfit_queuesize, n_galfit_complete, n_total_galfit_time)
 
             try:
@@ -262,6 +273,8 @@ def completeness_worker(file_queue, src_img, img_size, psf_file,
 
             # logger.debug("%s ==> %d" % (galfit_cmd, returncode))
 
+        print("Generated %d artificial galaxies in %.2f seconds" % (
+            len(job['sources'].index), total_galfit_time))
         ###############################
         #
         # Now we have all models in one batch completed
@@ -291,6 +304,20 @@ def completeness_worker(file_queue, src_img, img_size, psf_file,
         # the reference catalog generated from only the input image
         #
         ###############################
+        raw_catalog = run_sextractor.run_sex(
+            file_queue=None,
+            sex_exe=sex_exe,
+            sex_conf=sex_conf,
+            sex_param=sex_param,
+            fix_vot_array=fix_vot_array_data,
+            single_frame=(comp_image_fn, weight_fn)
+        )
+        # raw_catalog.info()
+
+
+        # TODO: write script to convert FITS catalogs to some format
+        #  ds9 can handle to make testing etc easier, but that doesn't take
+        #  forever to read & write
 
         # print(job['params'])
         file_queue.task_done()
@@ -309,9 +336,9 @@ if __name__ == "__main__":
     # setup command line parameters
     cmdline = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-    cmdline.add_argument("--conf", dest="sex_conf", default=os.path.join(config_dir, "sex4psfex.conf"),
+    cmdline.add_argument("--conf", dest="sex_conf", default=os.path.join(config_dir, "sex.conf"),
                          help="source extractor config filename")
-    cmdline.add_argument("--params", dest="sex_params", default=os.path.join(config_dir, "sex4psfex.param"),
+    cmdline.add_argument("--params", dest="sex_params", default=os.path.join(config_dir, "sex.param"),
                          help="number of models to insert into each image")
     cmdline.add_argument("--nprocs", dest="number_processes", type=int,
                          default=4, #multiprocessing.cpu_count(),
@@ -431,6 +458,8 @@ if __name__ == "__main__":
         # Figure out the other files needed for this one
         #
         psf_file = set_or_replace(filename, args.psf_image)
+        weight_fn = set_or_replace(filename, args.weight_image)
+
         #
         # also copy the PSF image to the singles directory
         _,bn = os.path.split(psf_file)
@@ -501,6 +530,10 @@ if __name__ == "__main__":
                     singles_dir=singles_dirname,
                     singles_size=300,
                     galfit_exe=args.galfit_exe,
+                    sex_exe=args.sex_exe,
+                    sex_conf=args.sex_conf,
+                    sex_param=args.sex_params,
+                    weight_fn=weight_fn,
                 )
             )
             p.daemon = True
